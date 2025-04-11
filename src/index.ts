@@ -9,7 +9,9 @@ import {
 import { contentItemOperationsTool } from './tools/content-tools';
 import { mediaItemOperationsTool } from './tools/media-tools';
 import { 
+    frameOperationsTool,
     groupOperationsTool, 
+    tagItemOperationsTool, 
     tagOperationsTool,
 } from './tools/organization-tools';
 import { connectorOperationsTool } from './tools/connector-tools';
@@ -72,6 +74,55 @@ const server = new FastMCP({
     reconnectAttempts: 5 // Limit reconnection attempts
 } as ServerOptions<undefined>);
 
+/**
+ * =====================================================
+ *              MIRO POSITIONING SYSTEM GUIDE 
+ * =====================================================
+ * 
+ * COMPREHENSIVE GUIDE FOR LLM/AGENT USING MIRO MCP SERVER
+ * 
+ * 1. COORDINATE SYSTEMS AND REFERENCE POINTS:
+ *    - Board center is at coordinates {x:0, y:0}, "relativeTo": "canvas_center"
+ *    - Item coordinates refer to the center point of the item
+ *    - All items support multiple reference points:
+ *      a) "canvas_center": Position relative to board center (0,0)
+ *      b) "parent_top_left": Position relative to parent frame's top-left
+ *      c) "parent_center": Position relative to parent frame's center
+ *      d) "parent_bottom_right": Position relative to parent frame's bottom-right
+ *      e) "parent_percentage": Use percentage values for responsive positioning (e.g., "50%,50%")
+ * 
+ * 2. POSITIONING EXAMPLES:
+ *    - Board center: {"x": 0, "y": 0, "relativeTo": "canvas_center"}
+ *    - Top-left of parent: {"x": 10, "y": 10, "relativeTo": "parent_top_left"}
+ *    - Center of parent: {"x": 0, "y": 0, "relativeTo": "parent_center"}
+ *    - Bottom-right of parent: {"x": -10, "y": -10, "relativeTo": "parent_bottom_right"}
+ *    - Percentage positioning: {"x": "50%", "y": "50%", "relativeTo": "parent_percentage"}
+ * 
+ * 3. COORDINATE DIRECTION:
+ *    - Positive x extends right, positive y extends down
+ *    - For parent_top_left: (0,0) is top-left, (+x,+y) moves right and down
+ *    - For parent_center: (0,0) is center, (+x,+y) moves right and down
+ *    - For parent_bottom_right: (0,0) is bottom-right, (-x,-y) moves left and up
+ * 
+ * 4. API BEHAVIOR AND BEST PRACTICES:
+ *    - When reading items: Position includes "relativeTo" property
+ *    - When creating/updating: Our server handles reference conversion
+ *    - Always use numeric values for absolute coordinates
+ *    - For percentage values, use strings with % suffix: "50%"
+ *    - Never nest frames inside frames (not supported by Miro API)
+ *    - Connectors cannot be assigned to parent frames
+ * 
+ * 5. VALIDATION:
+ *    - Our server validates positions based on parent geometry
+ *    - For parent_percentage: Values must be between "0%" and "100%"
+ *    - For parent_top_left: Values must be positive and within parent bounds
+ *    - For parent_center: Values must be within half-width/height of parent
+ *    - For parent_bottom_right: Values must be negative and within parent bounds
+ * 
+ * This system enables precise control over item positioning, especially for
+ * creating complex layouts with parent-child relationships.
+ */
+
 // Register tools in order of importance
 
 // 1. Context Understanding Tools
@@ -89,18 +140,18 @@ server.addTool(mediaItemOperationsTool); // Moved up for higher priority
 server.addTool(appCardOperationsTool);   // Moved up for higher priority
 
 // 4. Core Manipulation Tools
-server.addTool(boardOperationsTool);
-server.addTool(bulkItemCreationTool);
+server.addTool(boardOperationsTool); // Enable board-level operations
+server.addTool(bulkItemCreationTool); // Enable bulk item creation for improved efficiency
 server.addTool(contentItemOperationsTool);
 server.addTool(itemPositionOperationsTool);
 server.addTool(itemDeletionOperationsTool);
 
 // 5. Organization and Structure Tools
-// server.addTool(frameOperationsTool); // Commented out: Replaced by searchTool with parent_id filtering
+server.addTool(frameOperationsTool); // Essential for creating frames with advanced positioning support
 server.addTool(connectorOperationsTool);
 server.addTool(groupOperationsTool);
 server.addTool(tagOperationsTool);
-// server.addTool(tagItemOperationsTool); // Commented out: Replaced by searchTool with tag-based filtering
+server.addTool(tagItemOperationsTool);
 
 // 6. Collaboration Tools
 server.addTool(widgetOperationsTool);
@@ -159,6 +210,7 @@ process.on('unhandledRejection', (reason, promise) => {
 // Start the server
 console.log('Starting Miro MCP Server (Explicit)...');
 try {
+    // Start server
     server.start({
         transportType: 'sse',
         sse: {
@@ -170,6 +222,16 @@ try {
     console.log('Miro MCP Server (Explicit) started successfully on port ' + port + '.');
     console.log(`Server URL: http://localhost:${port}/sse`);
     console.log('All tools are now fully implemented');
+    
+    // Display enhanced positioning system information
+    console.log(`🌟 Enhanced positioning system enabled with support for:`);
+    console.log(`  - canvas_center: Position relative to board center (0,0)`);
+    console.log(`  - parent_top_left: Position relative to parent's top-left corner`);
+    console.log(`  - parent_center: Position relative to parent's center point`);
+    console.log(`  - parent_bottom_right: Position relative to parent's bottom-right corner`);
+    console.log(`  - parent_percentage: Position using percentage values (e.g., "50%,50%")`);
+    console.log(`✅ All coordinates and reference points are LLM-friendly with detailed descriptions`);
+    console.log('Press Ctrl+C to stop the server');
 } catch (error) {
     console.error('Error starting server:', error);
     if (error instanceof Error) {
