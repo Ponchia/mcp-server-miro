@@ -15,6 +15,57 @@ const containsHtml = (text: string): boolean => {
 };
 
 /**
+ * Provides examples of properly formatted HTML for Miro text elements
+ */
+const getHtmlFormattingExamples = (): string => {
+  return `
+Miro Text Element HTML Formatting Examples:
+
+1. Basic paragraph:
+   <p>This is a simple paragraph of text.</p>
+
+2. Multiple paragraphs:
+   <p>This is the first paragraph.</p>
+   <p>This is the second paragraph.</p>
+
+3. Text formatting:
+   <p>This text has <strong>bold</strong>, <em>italic</em>, and <u>underlined</u> words.</p>
+   <p>You can also use <b>bold</b>, <i>italic</i>, and <s>strikethrough</s>.</p>
+
+4. Links:
+   <p>Visit <a href="https://example.com">this website</a> for more information.</p>
+
+5. Lists:
+   <p>Unordered list:</p>
+   <ul>
+     <li>First item</li>
+     <li>Second item</li>
+     <li>Third item</li>
+   </ul>
+   
+   <p>Ordered list:</p>
+   <ol>
+     <li>First step</li>
+     <li>Second step</li>
+     <li>Third step</li>
+   </ol>
+
+6. Combining elements:
+   <p>This paragraph contains a <strong>bold section</strong> and an <em>italic section</em>.</p>
+   <p>You can <a href="https://example.com"><strong>combine</strong> formatting <em>in links</em></a> too.</p>
+
+7. Line breaks:
+   <p>This line<br>has a<br>break.</p>
+
+8. Using spans (note that style attributes within spans may not be fully supported):
+   <p>Text with <span>span elements</span> for grouping.</p>
+
+Remember: Miro only supports: p, a, strong, b, em, i, u, s, span, ol, ul, li, br tags.
+All other tags will be escaped and shown as plain text.
+`;
+};
+
+/**
  * Validates HTML content for Miro compatibility
  * Miro supports a limited set of HTML tags: <p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>
  * This function preserves supported tags and sanitizes unsupported ones.
@@ -25,19 +76,159 @@ const validateHtmlForMiro = (html: string): string => {
   // These are the only HTML tags supported by Miro according to their documentation
   const supportedTags = ['p', 'a', 'strong', 'b', 'em', 'i', 'u', 's', 'span', 'ol', 'ul', 'li', 'br'];
   
+  // Track any unsupported tags for logging
+  const unsupportedTagsFound: string[] = [];
+  
   // Define regex to match HTML tags
   const tagRegex = /<\/?([a-z][a-z0-9]*)\b[^>]*>/gi;
   
   // Replace HTML tags
-  return html.replace(tagRegex, (match, tagName) => {
+  const sanitizedHtml = html.replace(tagRegex, (match, tagName) => {
     // If the tag is in our supported list, keep it
     if (supportedTags.includes(tagName.toLowerCase())) {
       return match;
     }
     
+    // Track unsupported tags for logging
+    if (!unsupportedTagsFound.includes(tagName.toLowerCase())) {
+      unsupportedTagsFound.push(tagName.toLowerCase());
+    }
+    
     // For unsupported tags, escape them so they show as plain text
     return match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
   });
+  
+  // Log any unsupported tags that were found and escaped
+  if (unsupportedTagsFound.length > 0) {
+    console.log(`Warning: Escaped unsupported HTML tags: ${unsupportedTagsFound.join(', ')}. These will appear as plain text in Miro.`);
+    console.log(`Miro only supports these HTML tags: ${supportedTags.join(', ')}`);
+  }
+  
+  return sanitizedHtml;
+};
+
+/**
+ * Processes and enhances span styling to ensure compatibility with Miro
+ * Provides support for common style attributes in span elements
+ */
+const processSpanStyles = (content: string): string => {
+  if (!content || !containsHtml(content)) return content;
+
+  // Convert typical CSS style formats to formats Miro accepts
+  return content.replace(
+    /(<span\s+style=["'])([^"']+)(["'][^>]*>)/gi,
+    (match, start: string, styles: string, end: string) => {
+      // Process each style attribute individually
+      const processedStyles = styles
+        .split(';')
+        .filter((s: string) => s.trim())
+        .map((style: string) => {
+          const parts = style.split(':').map(s => s.trim());
+          const property = parts[0];
+          const value = parts[1];
+          
+          // Skip if property or value is empty
+          if (!property || !value) return '';
+          
+          // Process specific style properties
+          switch (property.toLowerCase()) {
+            case 'color': {
+              // Ensure color is properly formatted (remove spaces, add # if missing for hex)
+              const colorValue = value.replace(/\s/g, '');
+              if (/^[0-9a-f]{6}$/i.test(colorValue)) {
+                return `color:#${colorValue}`;
+              }
+              return `color:${colorValue}`;
+            }
+              
+            case 'background-color':
+            case 'background': {
+              // Background colors for spans
+              const bgColor = value.replace(/\s/g, '');
+              if (/^[0-9a-f]{6}$/i.test(bgColor)) {
+                return `background-color:#${bgColor}`;
+              }
+              return `background-color:${bgColor}`;
+            }
+              
+            case 'font-weight':
+              // Font weight (bold)
+              return value.toLowerCase() === 'bold' || parseInt(value, 10) >= 600 ? 
+                'font-weight:bold' : 'font-weight:normal';
+              
+            case 'font-style':
+              // Font style (italic)
+              return value.toLowerCase() === 'italic' ? 'font-style:italic' : 'font-style:normal';
+              
+            case 'text-decoration':
+              // Text decoration (underline, line-through)
+              return `text-decoration:${value}`;
+              
+            default:
+              // Pass through other styles
+              return `${property}:${value}`;
+          }
+        })
+        .filter(Boolean)
+        .join(';');
+      
+      return `${start}${processedStyles}${end}`;
+    }
+  );
+};
+
+/**
+ * Generates a text-only preview of how HTML content will render in Miro
+ */
+const generateTextPreview = (htmlContent: string): string => {
+  if (!htmlContent) return 'Empty content';
+  
+  // Simple HTML to text conversion for preview purposes
+  let textPreview = htmlContent
+    // Replace paragraph tags with newlines
+    .replace(/<\/p>\s*<p>/gi, '\n\n')
+    .replace(/<p[^>]*>/gi, '')
+    .replace(/<\/p>/gi, '')
+    
+    // Handle lists
+    .replace(/<ul[^>]*>/gi, '\n')
+    .replace(/<\/ul>/gi, '\n')
+    .replace(/<ol[^>]*>/gi, '\n')
+    .replace(/<\/ol>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '• ')
+    .replace(/<\/li>/gi, '\n')
+    
+    // Handle links
+    .replace(/<a[^>]*href=["']([^"']*)["'][^>]*>(.*?)<\/a>/gi, '$2 [$1]')
+    
+    // Handle breaks
+    .replace(/<br\s*\/?>/gi, '\n')
+    
+    // Remove other tags but keep their content
+    .replace(/<[^>]*>/g, '')
+    
+    // Decode HTML entities
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+  
+  // Trim excessive whitespace and normalize spacing
+  textPreview = textPreview
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
+  
+  // Format the preview nicely
+  return [
+    '----------------------------------------',
+    'TEXT PREVIEW (how it may appear in Miro):',
+    '----------------------------------------',
+    textPreview,
+    '----------------------------------------'
+  ].join('\n');
 };
 
 // Schema definitions for content items
@@ -133,7 +324,7 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
 
 ACTIONS:
 (1) CREATE - Add new items with specified properties:
-   - Text: Supports basic HTML formatting (<p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>)
+   - Text: Supports HTML formatting with specific tags (see HTML formatting section below)
    - Shapes: 25+ types (rectangle, circle, arrow, etc.) with customizable borders, fill colors
    - Sticky notes: Simple colored notes (limited to named colors like "yellow", "blue", "green")
 
@@ -141,6 +332,25 @@ ACTIONS:
 (3) GET_ALL - List all items of a specific type
 (4) UPDATE - Modify existing items' content or appearance
 (5) DELETE - Remove items entirely
+
+TEXT HTML FORMATTING:
+- Supported HTML tags: <p>, <a>, <b>, <strong>, <i>, <em>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>
+- All other HTML tags will be escaped and displayed as plain text
+- Character limit: 6000 characters
+- Expected rendering examples:
+  * "<p>Normal paragraph text</p>" → Normal paragraph text
+  * "<p>Text with <strong>bold</strong> and <em>italic</em></p>" → Text with bold and italic
+  * "<p>Text with <a href='https://example.com'>link</a></p>" → Text with clickable link
+  * "<ul><li>First item</li><li>Second item</li></ul>" → Bulleted list with two items
+  * "<p>Text with <span style='color:red'>colored span</span></p>" → Note: inline styles in spans may not be fully supported
+
+TEXT STYLE LIMITATIONS:
+- Color: Use hex values (#RRGGBB) - Examples: "#FF0000" (red), "#000000" (black)
+- Font families: Limited to Miro's supported fonts (arial, roboto, times_new_roman, etc.)
+- Font sizes: Numeric values (14 = default, range from 0.001 to unlimited)
+- Text alignment: "left" (default), "center", or "right"
+- Background color: Set with fillColor (use "transparent" for no background)
+- Background opacity: 0.0 (transparent) to 1.0 (solid)
 
 STYLING EXAMPLES:
 - Text: {color: "#FF0000", fontFamily: "roboto", fontSize: 18, textAlign: "center"}
@@ -167,17 +377,78 @@ For all items, omitted parameters will use reasonable defaults. For sticky notes
         // Validate HTML content for Miro compatibility
         if (data?.content && containsHtml(data.content)) {
             console.log(`HTML content detected. Validating for Miro compatibility.`);
-            const originalContent = data.content;
-            data = { ...data, content: validateHtmlForMiro(data.content) };
+            
+            // First apply span style processing
+            const styledContent = processSpanStyles(data.content);
+            
+            // Then validate HTML tags
+            const originalContent = styledContent;
+            data = { ...data, content: validateHtmlForMiro(styledContent) };
+            
+            // Generate a preview of how the text will look
+            if (data?.content) {
+                console.log(generateTextPreview(data.content));
+            }
             
             if (data.content !== originalContent) {
                 console.log(`Modified HTML content to use only Miro-supported tags (<p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>).`);
+                console.log(`Original: ${originalContent}`);
+                console.log(`Modified: ${data.content}`);
             }
         }
 
         // Process text elements properly
         if (type === 'text') {
             console.log(`Handling native text element. Miro text elements support a limited set of HTML tags.`);
+            
+            // Different validation approach for updates vs. creates
+            if (action === 'update' && data?.content && containsHtml(data.content)) {
+                // For updates, we're more lenient with validation to avoid breaking existing content
+                console.log('Update operation: Using more lenient HTML validation.');
+                
+                const supportedTags = ['p', 'a', 'strong', 'b', 'em', 'i', 'u', 's', 'span', 'ol', 'ul', 'li', 'br'];
+                const tagRegex = /<\/?([a-z][a-z0-9]*)\b[^>]*>/gi;
+                const unsupportedTagsFound: string[] = [];
+                
+                let match;
+                const contentCopy = String(data.content);
+                while ((match = tagRegex.exec(contentCopy)) !== null) {
+                    const tagName = match[1].toLowerCase();
+                    if (!supportedTags.includes(tagName) && !unsupportedTagsFound.includes(tagName)) {
+                        unsupportedTagsFound.push(tagName);
+                    }
+                }
+                
+                // Just warn about unsupported tags rather than modifying content
+                if (unsupportedTagsFound.length > 0) {
+                    console.warn(`Warning: Content contains potentially unsupported tags: ${unsupportedTagsFound.join(', ')}`);
+                    console.warn('These tags may be escaped as plain text in Miro.');
+                }
+                
+                // Process span styles even for updates
+                data = { ...data, content: processSpanStyles(data.content) };
+            }
+            
+            // Ensure text content has proper paragraph tags if it's plain text
+            if (data && data.content && !containsHtml(data.content)) {
+                // If the content doesn't contain HTML, wrap it in <p> tags for proper Miro formatting
+                console.log('Plain text content detected. Wrapping in paragraph tags for proper Miro formatting.');
+                data = { ...data, content: `<p>${data.content}</p>` };
+            } else if (data && data.content) {
+                // Validate and auto-correct HTML content
+                const { corrected, changes } = validateAndCorrectHtml(data.content);
+                if (changes.length > 0) {
+                    console.log('Auto-corrected HTML content issues:');
+                    changes.forEach(change => console.log(`- ${change}`));
+                    data = { ...data, content: corrected };
+                }
+            }
+            
+            // Check if the content is empty or missing and needs a default
+            if (data && (!data.content || data.content.trim() === '')) {
+                console.log('Empty content detected. Adding default paragraph tag.');
+                data = { ...data, content: '<p></p>' };
+            }
             
             // Check if parent frame exists (if specified)
             if (parent && parent.id) {
@@ -263,7 +534,113 @@ For all items, omitted parameters will use reasonable defaults. For sticky notes
                 
                 if (typeof fontFamily !== 'string') return 'arial';
                 
-                // List of supported Miro font families
+                // Convert to lowercase for case-insensitive matching
+                const fontLower = fontFamily.toLowerCase().trim();
+                
+                // Comprehensive mapping from common font names to Miro supported font families
+                const fontFamilyMap: Record<string, string> = {
+                    // Sans-serif fonts
+                    'arial': 'arial',
+                    'helvetica': 'arial',
+                    'helvetica neue': 'arial',
+                    'sans-serif': 'arial',
+                    'sans': 'arial',
+                    'system-ui': 'arial',
+                    
+                    // Serif fonts
+                    'times': 'times_new_roman',
+                    'times new roman': 'times_new_roman',
+                    'times-new-roman': 'times_new_roman',
+                    'timesnewroman': 'times_new_roman',
+                    'serif': 'pt_serif',
+                    'georgia': 'georgia',
+                    
+                    // Monospace fonts
+                    'courier': 'roboto_mono',
+                    'courier new': 'roboto_mono',
+                    'courier-new': 'roboto_mono',
+                    'monospace': 'roboto_mono',
+                    'menlo': 'roboto_mono',
+                    'consolas': 'roboto_mono',
+                    'monaco': 'roboto_mono',
+                    
+                    // Google fonts and common web fonts
+                    'roboto': 'roboto',
+                    'roboto condensed': 'roboto_condensed',
+                    'roboto-condensed': 'roboto_condensed',
+                    'robotocondensed': 'roboto_condensed',
+                    'roboto slab': 'roboto_slab',
+                    'roboto-slab': 'roboto_slab',
+                    'robotoslab': 'roboto_slab',
+                    'open sans': 'open_sans',
+                    'open-sans': 'open_sans',
+                    'opensans': 'open_sans',
+                    'pt sans': 'pt_sans',
+                    'pt-sans': 'pt_sans',
+                    'ptsans': 'pt_sans',
+                    'pt serif': 'pt_serif',
+                    'pt-serif': 'pt_serif',
+                    'ptserif': 'pt_serif',
+                    'pt sans narrow': 'pt_sans_narrow',
+                    'pt-sans-narrow': 'pt_sans_narrow',
+                    'ptsansnarrow': 'pt_sans_narrow',
+                    
+                    // Creative fonts
+                    'marker': 'permanent_marker',
+                    'permanent marker': 'permanent_marker',
+                    'permanent-marker': 'permanent_marker',
+                    'permanentmarker': 'permanent_marker',
+                    'handwriting': 'caveat',
+                    'script': 'caveat',
+                    'caveat': 'caveat',
+                    'comic': 'bangers',
+                    'comic sans': 'bangers',
+                    'bangers': 'bangers',
+                    'cursive': 'caveat',
+                    'abril fatface': 'abril_fatface',
+                    'abril-fatface': 'abril_fatface',
+                    'abrilfatface': 'abril_fatface',
+                    
+                    // IBM fonts
+                    'ibm plex sans': 'plex_sans',
+                    'ibm-plex-sans': 'plex_sans',
+                    'plexsans': 'plex_sans',
+                    'ibm plex serif': 'plex_serif',
+                    'ibm-plex-serif': 'plex_serif',
+                    'plexserif': 'plex_serif',
+                    'ibm plex mono': 'plex_mono',
+                    'ibm-plex-mono': 'plex_mono',
+                    'plexmono': 'plex_mono',
+                    
+                    // Japanese/Chinese/Korean fonts
+                    'noto sans': 'noto_sans',
+                    'noto-sans': 'noto_sans',
+                    'notosans': 'noto_sans',
+                    'noto serif': 'noto_serif',
+                    'noto-serif': 'noto_serif',
+                    'notoserif': 'noto_serif',
+                    'noto sans jp': 'noto_sans_jp',
+                    'noto-sans-jp': 'noto_sans_jp',
+                    'notosansjp': 'noto_sans_jp',
+                    'noto serif jp': 'noto_serif_jp',
+                    'noto-serif-jp': 'noto_serif_jp',
+                    'notoserifjp': 'noto_serif_jp'
+                };
+                
+                // Direct match
+                if (fontFamilyMap[fontLower]) {
+                    console.log(`Mapped font '${fontFamily}' to Miro font '${fontFamilyMap[fontLower]}'`);
+                    return fontFamilyMap[fontLower];
+                }
+                
+                // Check for close matches by removing spaces, hyphens
+                const fontNoSpaces = fontLower.replace(/[-\s]/g, '');
+                if (fontFamilyMap[fontNoSpaces]) {
+                    console.log(`Mapped font '${fontFamily}' to Miro font '${fontFamilyMap[fontNoSpaces]}'`);
+                    return fontFamilyMap[fontNoSpaces];
+                }
+                
+                // List of supported Miro font families for direct use
                 const supportedFonts = [
                     'arial', 'abril_fatface', 'bangers', 'eb_garamond', 'georgia', 'graduate', 
                     'gravitas_one', 'fredoka_one', 'nixie_one', 'open_sans', 'permanent_marker', 
@@ -273,38 +650,19 @@ For all items, omitted parameters will use reasonable defaults. For sticky notes
                     'plex_mono', 'spoof', 'tiempos_text', 'formular'
                 ];
                 
-                // Direct match
-                const fontLower = fontFamily.toLowerCase();
+                // Check if already a valid Miro font
                 if (supportedFonts.includes(fontLower)) {
                     return fontLower;
                 }
                 
-                // Check for close matches with underscores vs hyphens or spaces
-                const fontNoSpaces = fontLower.replace(/[-\s]/g, '_');
-                if (supportedFonts.includes(fontNoSpaces)) {
-                    return fontNoSpaces;
+                // If font has underscores already, check if it's a valid Miro font
+                if (fontLower.includes('_') && supportedFonts.includes(fontLower)) {
+                    return fontLower;
                 }
                 
-                // Common font family mappings
-                const fontMap: Record<string, string> = {
-                    'permanentmarker': 'permanent_marker',
-                    'roboto': 'roboto',
-                    'arial': 'arial',
-                    'plexsans': 'plex_sans',
-                    'sans': 'arial',
-                    'serif': 'pt_serif',
-                    'monospace': 'roboto_mono',
-                    'courier': 'roboto_mono',
-                    'helvetica': 'arial',
-                    'times': 'times_new_roman'
-                };
-                
-                const fontNoSpecialChars = fontLower.replace(/[^a-z0-9]/g, '');
-                if (fontMap[fontNoSpecialChars]) {
-                    return fontMap[fontNoSpecialChars];
-                }
-                
-                return 'arial'; // Default
+                // If we can't find a match, return default
+                console.log(`Font '${fontFamily}' not recognized, defaulting to 'arial'`);
+                return 'arial';
             };
             
             // Process and normalize text styles
@@ -538,9 +896,24 @@ For all items, omitted parameters will use reasonable defaults. For sticky notes
         
         // Set default width for text if not provided
         if (type === 'text' && (!normalizedGeometry || !normalizedGeometry.width)) {
+            // Calculate approximate width based on content length and font size
+            const textContent = data?.content?.replace(/<[^>]*>/g, '') || '';
+            const contentLength = textContent.length;
+            const fontSize = style?.fontSize ? 
+                (typeof style.fontSize === 'string' ? parseFloat(style.fontSize) : style.fontSize) : 14;
+            
+            // Formula: base width + adjustment based on text length and font size
+            // Min width is 105px (Miro default), max is 800px
+            const calculatedWidth = Math.max(
+                105, 
+                Math.min(800, 105 + (contentLength * fontSize * 0.6))
+            );
+            
+            console.log(`Calculating optimal text width based on content length (${contentLength} chars) and font size (${fontSize}px): ${calculatedWidth}px`);
+            
             body.geometry = { 
                 ...normalizedGeometry,
-                width: 105 // Default text width
+                width: calculatedWidth 
             };
         }
         // Handle geometry constraints for sticky notes
@@ -626,12 +999,31 @@ For all items, omitted parameters will use reasonable defaults. For sticky notes
                     response = await miroClient.get(url);
                 }
             } else if (method === 'post') {
+                // If we're creating a text item, provide helpful HTML examples in logs
+                if (action === 'create' && type === 'text') {
+                    console.log('Creating new text element...');
+                    
+                    // If content contains HTML, provide examples for reference
+                    if (data && data.content && containsHtml(data.content)) {
+                        console.log('HTML content detected in text element.');
+                        console.log('For reference, here are examples of properly formatted HTML for Miro:');
+                        console.log(getHtmlFormattingExamples());
+                    }
+                }
+                
                 response = await miroClient.post(url, body);
                 // Track creation in history
                 if (response.data) {
                     modificationHistory.trackCreation(response.data);
                 }
             } else if (method === 'patch') {
+                // If we're updating a text item with HTML, provide helpful examples
+                if (action === 'update' && type === 'text' && data && data.content && containsHtml(data.content)) {
+                    console.log('Updating text element with HTML content.');
+                    console.log('For reference, here are examples of properly formatted HTML for Miro:');
+                    console.log(getHtmlFormattingExamples());
+                }
+                
                 response = await miroClient.patch(url, body);
                 // Track modification in history
                 if (response.data) {
@@ -663,11 +1055,53 @@ For all items, omitted parameters will use reasonable defaults. For sticky notes
                     const validColors = ['gray', 'light_yellow', 'yellow', 'orange', 'light_green', 'green', 'dark_green', 'cyan', 'light_pink', 'pink', 'violet', 'red', 'light_blue', 'blue', 'dark_blue', 'black'];
                     return formatApiError(error, `Error: Invalid style properties for sticky note. Sticky notes only accept specific named colors: ${validColors.join(', ')}. Hex color values are not supported for sticky notes.`);
                 } else if (axiosError.response.status === 400 && data?.content && containsHtml(data.content)) {
-                    // Updated error message for HTML formatting issues
-                    return formatApiError(error, `Error: HTML formatting validation failed. Miro only supports these HTML tags: <p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>. Other HTML tags will be escaped as plain text.`);
+                    // Improved error message for HTML formatting issues with specific advice
+                    const supportedTags = ['p', 'a', 'strong', 'b', 'em', 'i', 'u', 's', 'span', 'ol', 'ul', 'li', 'br'];
+                    
+                    // Attempt to identify problematic tags
+                    const tagRegex = /<\/?([a-z][a-z0-9]*)\b[^>]*>/gi;
+                    const allTags: string[] = [];
+                    let match;
+                    
+                    // Clone data.content to avoid modifying the original
+                    const contentCopy = '' + data.content;
+                    
+                    while ((match = tagRegex.exec(contentCopy)) !== null) {
+                        const tagName = match[1].toLowerCase();
+                        if (!supportedTags.includes(tagName) && !allTags.includes(tagName)) {
+                            allTags.push(tagName);
+                        }
+                    }
+                    
+                    let errorMessage = `Error: HTML formatting validation failed. Miro only supports these HTML tags: ${supportedTags.join(', ')}. Other HTML tags will be escaped as plain text.`;
+                    
+                    if (allTags.length > 0) {
+                        errorMessage += ` Problematic tags found: ${allTags.join(', ')}.`;
+                    }
+                    
+                    // Add specific formatting advice
+                    errorMessage += `\n\nExamples of valid HTML formatting:
+- Simple paragraph: "<p>Text content</p>"
+- Bold text: "<p><strong>Bold text</strong> or <b>also bold</b></p>"
+- Italic text: "<p><em>Italic text</em> or <i>also italic</i></p>"
+- Links: "<p><a href='https://example.com'>Link text</a></p>"
+- Lists: "<ul><li>First item</li><li>Second item</li></ul>"`;
+                    
+                    return formatApiError(error, errorMessage);
                 } else if (axiosError.response.status === 400 && style && style.color) {
-                    // Specific error for color format issues
-                    return formatApiError(error, `Error: Invalid color format. Colors must be valid hex values (e.g., "#FF0000" for red) or named colors. Make sure to include the # prefix for hex colors.`);
+                    // Enhanced error for color format issues with examples
+                    return formatApiError(error, `Error: Invalid color format. Colors must be valid hex values (e.g., "#FF0000" for red) or named colors. Make sure to include the # prefix for hex colors. Examples: "#000000" (black), "#FF0000" (red), "#0000FF" (blue).`);
+                } else if (axiosError.response.status === 400 && style && style.fontFamily) {
+                    // Specific error for font family issues
+                    const supportedFonts = [
+                        'arial', 'abril_fatface', 'bangers', 'eb_garamond', 'georgia', 'graduate', 
+                        'gravitas_one', 'fredoka_one', 'nixie_one', 'open_sans', 'permanent_marker', 
+                        'pt_sans', 'pt_sans_narrow', 'pt_serif', 'rammetto_one', 'roboto', 
+                        'roboto_condensed', 'roboto_slab', 'caveat', 'times_new_roman', 'titan_one', 
+                        'lemon_tuesday', 'roboto_mono', 'noto_sans', 'plex_sans', 'plex_serif', 
+                        'plex_mono', 'spoof', 'tiempos_text', 'formular'
+                    ];
+                    return formatApiError(error, `Error: Invalid font family. Miro only supports these font families: ${supportedFonts.join(', ')}.`);
                 } else if (axiosError.response.status === 400 && style) {
                     // Log more details about what might be wrong with style
                     console.error(`Style properties that might be causing issues: ${JSON.stringify(style)}`);
@@ -675,9 +1109,79 @@ For all items, omitted parameters will use reasonable defaults. For sticky notes
                 } else if (axiosError.response.status === 400 && parent) {
                     // Position outside parent boundaries
                     return formatApiError(error, `Error: Position is outside parent frame boundaries. When placing items in a frame, ensure coordinates are within the frame's dimensions or use 'parent_top_left' as the relativeTo reference.`);
+                } else if (axiosError.response.status === 413) {
+                    // Content too large error
+                    return formatApiError(error, `Error: Content is too large. Miro text elements have a limit of 6,000 characters.`);
                 }
             }
             return formatApiError(error);
         }
     },
+};
+
+/**
+ * Validates and corrects HTML content to ensure it renders correctly in Miro
+ * Identifies and fixes common issues like unclosed tags
+ */
+const validateAndCorrectHtml = (html: string): { corrected: string; changes: string[] } => {
+  if (!html) return { corrected: '', changes: [] };
+  
+  const changes: string[] = [];
+  let corrected = html;
+  
+  // Check if content starts with paragraph tag
+  if (!/^<p[^>]*>/.test(corrected) && !/<(ul|ol)[^>]*>/.test(corrected.substring(0, 30))) {
+    corrected = `<p>${corrected}</p>`;
+    changes.push('Added paragraph tags around content');
+  }
+  
+  // Ensure all paragraphs are properly closed
+  const unclosedParagraphMatches = corrected.match(/<p[^>]*>(?:(?!<\/p>).)*$/g);
+  if (unclosedParagraphMatches && unclosedParagraphMatches.length > 0) {
+    corrected = corrected + '</p>';
+    changes.push('Fixed unclosed paragraph tag');
+  }
+  
+  // Ensure all list items are properly closed
+  const unclosedListItemMatches = corrected.match(/<li[^>]*>(?:(?!<\/li>).)*$/g);
+  if (unclosedListItemMatches && unclosedListItemMatches.length > 0) {
+    corrected = corrected + '</li>';
+    changes.push('Fixed unclosed list item tag');
+  }
+  
+  // Ensure all lists are properly closed
+  if (/<ul[^>]*>(?:(?!<\/ul>).)*$/g.test(corrected)) {
+    corrected = corrected + '</ul>';
+    changes.push('Fixed unclosed unordered list tag');
+  }
+  if (/<ol[^>]*>(?:(?!<\/ol>).)*$/g.test(corrected)) {
+    corrected = corrected + '</ol>';
+    changes.push('Fixed unclosed ordered list tag');
+  }
+  
+  // Fix nested lists if found
+  if (/<(ul|ol)[^>]*>.*<(ul|ol)[^>]*>.*<\/(ul|ol)>.*<\/(ul|ol)>/s.test(corrected)) {
+    // Nested lists are technically supported but might cause issues
+    changes.push('Warning: Nested lists detected, may not render as expected in Miro');
+  }
+  
+  // Check for unclosed or improperly closed styling tags
+  ['strong', 'b', 'em', 'i', 'u', 's', 'span', 'a'].forEach(tag => {
+    const openCount = (corrected.match(new RegExp(`<${tag}[^>]*>`, 'g')) || []).length;
+    const closeCount = (corrected.match(new RegExp(`<\\/${tag}>`, 'g')) || []).length;
+    
+    if (openCount > closeCount) {
+      corrected = corrected + `</${tag}>`;
+      changes.push(`Fixed unclosed ${tag} tag`);
+    }
+  });
+  
+  // Process span styles to ensure proper formatting
+  const processedWithStyles = processSpanStyles(corrected);
+  if (processedWithStyles !== corrected) {
+    corrected = processedWithStyles;
+    changes.push('Optimized span style formatting for Miro compatibility');
+  }
+  
+  return { corrected, changes };
 }; 
