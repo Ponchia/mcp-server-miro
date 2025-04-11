@@ -5,6 +5,41 @@ import { normalizeStyleValues, normalizeGeometryValues, normalizePositionValues,
 import { ToolDefinition } from '../types/tool-types';
 import { miroBoardId } from '../config';
 
+// HTML processing functions
+/**
+ * Detects if text contains HTML markup
+ */
+const containsHtml = (text: string): boolean => {
+  const htmlRegex = /<([a-z][a-z0-9]*)\b[^>]*>(.*?)<\/\1>/i;
+  return htmlRegex.test(text);
+};
+
+/**
+ * Validates HTML content for Miro compatibility
+ * Miro supports a limited set of HTML tags: <p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>
+ * This function preserves supported tags and sanitizes unsupported ones.
+ */
+const validateHtmlForMiro = (html: string): string => {
+  if (!containsHtml(html)) return html;
+  
+  // These are the only HTML tags supported by Miro according to their documentation
+  const supportedTags = ['p', 'a', 'strong', 'b', 'em', 'i', 'u', 's', 'span', 'ol', 'ul', 'li', 'br'];
+  
+  // Define regex to match HTML tags
+  const tagRegex = /<\/?([a-z][a-z0-9]*)\b[^>]*>/gi;
+  
+  // Replace HTML tags
+  return html.replace(tagRegex, (match, tagName) => {
+    // If the tag is in our supported list, keep it
+    if (supportedTags.includes(tagName.toLowerCase())) {
+      return match;
+    }
+    
+    // For unsupported tags, escape them so they show as plain text
+    return match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  });
+};
+
 // Schema definitions for content items
 const ContentItemSchema = z.object({
     action: z.enum(['create', 'get', 'get_all', 'update', 'delete']).describe('The action to perform.'),
@@ -12,7 +47,7 @@ const ContentItemSchema = z.object({
     item_id: z.string().optional().describe('Item ID (required for get, update, delete actions).'),
     data: z.object({
         // Generic content properties
-        content: z.string().optional().describe('Text content. For text styling in Miro, use plain text with newlines for paragraph breaks. Miro does not support markdown or rich text formatting, so use separate text elements with different styles for visual hierarchy.'),
+        content: z.string().optional().describe('Text content. Miro text elements support these HTML tags: <p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>. For other formatting, use separate text elements with different styles.'),
         // Shape-specific properties
         shape: z.enum(['square', 'rectangle', 'round_rectangle', 'circle', 'triangle', 'rhombus', 
                      'diamond',
@@ -94,7 +129,7 @@ type ContentItemParams = z.infer<typeof ContentItemSchema>;
 // Implementation of content item operations tool
 export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
     name: 'mcp_miro_content_item_operations',
-    description: 'Creates and manages content on Miro boards including text, shapes with text, and sticky notes. Use this tool to: (1) create - add new text elements, shapes, or sticky notes with custom formatting, (2) get - retrieve a specific content item\'s details, (3) get_all - list all items of a specific type, (4) update - modify existing items\' content or appearance, (5) delete - remove items entirely. Text items in Miro work best with simple plain text and newlines for formatting. For different styles (headings, lists, etc.), create separate text elements with different font sizes and styles rather than using complex formatting. Shapes include 25+ variations (rectangles, circles, arrows, etc.) and can contain text. Sticky notes only support specific named colors (like "yellow", "blue", "green"), not hex values. All items can be positioned precisely on the board or within frames.',
+    description: 'Creates and manages content on Miro boards including text, shapes with text, and sticky notes. Use this tool to: (1) create - add new text elements, shapes, or sticky notes with custom formatting, (2) get - retrieve a specific content item\'s details, (3) get_all - list all items of a specific type, (4) update - modify existing items\' content or appearance, (5) delete - remove items entirely. Text items in Miro support basic HTML formatting with these tags: <p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>. Shapes include 25+ variations (rectangles, circles, arrows, etc.) and can contain text. Sticky notes only support specific named colors (like "yellow", "blue", "green"), not hex values. All items can be positioned precisely on the board or within frames.',
     parameters: ContentItemSchema,
     execute: async (args) => {
         console.log(`Content Item Operation: ${JSON.stringify(args, null, 2)}`);
@@ -106,9 +141,20 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
         let queryParams: Record<string, string> = {};
         const body: Record<string, unknown> = {};
 
+        // Validate HTML content for Miro compatibility
+        if (data?.content && containsHtml(data.content)) {
+            console.log(`HTML content detected. Validating for Miro compatibility.`);
+            const originalContent = data.content;
+            data = { ...data, content: validateHtmlForMiro(data.content) };
+            
+            if (data.content !== originalContent) {
+                console.log(`Modified HTML content to use only Miro-supported tags (<p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>).`);
+            }
+        }
+
         // Process text elements properly
         if (type === 'text') {
-            console.log(`Handling native text element. Miro text elements work best with simple plain text and newlines.`);
+            console.log(`Handling native text element. Miro text elements support a limited set of HTML tags.`);
             
             // Check if parent frame exists (if specified)
             if (parent && parent.id) {
@@ -533,9 +579,9 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
                 } else if (axiosError.response.status === 400 && style && type === 'sticky_note') {
                     // More specific error for sticky note color issues
                     return formatApiError(error, `Error: Invalid style properties for sticky note. Sticky notes only accept specific color names like 'yellow', 'blue', 'green', not hex values or unsupported color names.`);
-                } else if (axiosError.response.status === 400 && data?.content) {
-                    // Updated error message about text formatting
-                    return formatApiError(error, `Error: Text formatting issues detected. Miro text elements support only plain text with newlines. For different text styles, create multiple text elements with different styling.`);
+                } else if (axiosError.response.status === 400 && data?.content && containsHtml(data.content)) {
+                    // Updated error message for HTML formatting issues
+                    return formatApiError(error, `Error: HTML formatting validation failed. Miro only supports these HTML tags: <p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>. Other tags will be escaped.`);
                 } else if (axiosError.response.status === 400 && style) {
                     // Log more details about what might be wrong with style
                     console.error(`Style properties that might be causing issues: ${JSON.stringify(style)}`);
