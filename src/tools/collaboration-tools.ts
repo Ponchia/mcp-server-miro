@@ -292,16 +292,83 @@ export const appCardOperationsTool: ToolDefinition<AppCardItemParams> = {
         const normalizedGeometry = normalizeGeometryValues(args.geometry);
         const normalizedPosition = normalizePositionValues(args.position);
         
-        const requestBody = {
-            ...(args.data && { data: args.data }),
-            ...(normalizedStyle && { style: normalizedStyle }),
-            ...(normalizedPosition && { position: normalizedPosition }),
-            ...(normalizedGeometry && { geometry: normalizedGeometry }),
-            ...(args.parent && { parent: args.parent }),
-        };
-        console.log(`With body: ${JSON.stringify(requestBody)}`);
+        // If we have parent-relative positioning, we need to translate coordinates
+        if (normalizedPosition && args.parent?.id) {
+            try {
+                // Get parent item to retrieve its dimensions
+                const parentResponse = await miroClient.get(`/v2/boards/${miroBoardId}/items/${args.parent.id}`);
+                const parentGeometry = parentResponse.data.geometry;
+                
+                if (parentGeometry) {
+                    // Get reference system that was stored during normalization
+                    const refSystem = normalizedPosition.__refSystem as string || 'parent_top_left';
+                    
+                    // Get parent dimensions
+                    const parentWidth = parentGeometry.width || 0;
+                    const parentHeight = parentGeometry.height || 0;
+                    
+                    console.log(`Translating app card coordinates from ${refSystem} to parent_top_left`);
+                    console.log(`Parent dimensions: ${parentWidth}x${parentHeight}`);
+                    
+                    // Original coordinates
+                    const x = normalizedPosition.x as number;
+                    const y = normalizedPosition.y as number;
+                    
+                    // Transform coordinates based on reference system
+                    if (refSystem === 'parent_center') {
+                        normalizedPosition.x = x + (parentWidth / 2);
+                        normalizedPosition.y = y + (parentHeight / 2);
+                    } 
+                    else if (refSystem === 'parent_bottom_right') {
+                        normalizedPosition.x = parentWidth - x;
+                        normalizedPosition.y = parentHeight - y;
+                    } 
+                    else if (refSystem === 'parent_percentage') {
+                        normalizedPosition.x = (x / 100) * parentWidth;
+                        normalizedPosition.y = (y / 100) * parentHeight;
+                    }
+                }
+            } catch (error) {
+                console.error(`Error translating app card parent-relative coordinates: ${error}`);
+            }
+        }
+        
+        // Create clean body object without using spread operators
+        const body: Record<string, unknown> = {};
+        
+        // Add data if available
+        if (args.data) {
+            body.data = args.data;
+        }
+        
+        // Clean up position metadata and add to body if available
+        if (normalizedPosition) {
+            // Create a clean position object without metadata
+            body.position = {
+                x: normalizedPosition.x,
+                y: normalizedPosition.y,
+                origin: normalizedPosition.origin || 'center'
+            };
+        }
+        
+        // Add style if available
+        if (normalizedStyle) {
+            body.style = normalizedStyle;
+        }
+        
+        // Add geometry if available
+        if (normalizedGeometry) {
+            body.geometry = normalizedGeometry;
+        }
+        
+        // Add parent if available and has id
+        if (args.parent && typeof args.parent === 'object' && 'id' in args.parent) {
+            body.parent = args.parent;
+        }
+        
+        console.log(`With body: ${JSON.stringify(body)}`);
         try {
-            const response = await miroClient.post(url, requestBody);
+            const response = await miroClient.post(url, body);
             console.log(`API Call Successful: ${response.status}`);
             
             // Track creation in history

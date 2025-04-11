@@ -98,11 +98,13 @@ FRAME-SPECIFIC NOTES: Frame deletion will not delete its contained items - they 
         const { action, item_id, ...requestBody } = args;
         let url = '';
         let method = '';
-        let body = null;
         let queryParams = {};
 
         // Normalize geometry values
         const normalizedGeometry = normalizeGeometryValues(requestBody.geometry);
+        
+        // Normalize style values 
+        const normalizedStyle = normalizeStyleValues(requestBody.style);
         
         // Normalize position values but preserve relativeTo for validation
         let positionHasRelativeTo = false;
@@ -119,25 +121,38 @@ FRAME-SPECIFIC NOTES: Frame deletion will not delete its contained items - they 
         // Add validation warning for parent_top_left without parent
         if (positionHasRelativeTo && relativeTo === 'parent_top_left' && action === 'create') {
             console.warn(`Warning: relativeTo="parent_top_left" is specified for a frame, but frames cannot be parented to other frames. Using canvas_center instead.`);
-            // Force relativeTo to be canvas_center for frames
-            if (normalizedPosition) {
-                (normalizedPosition as Record<string, unknown>).relativeTo = 'canvas_center';
-            }
+            // This warning is just informational - the position is already normalized without internal properties
         }
         
-        // Normalize style values
-        const normalizedStyle = normalizeStyleValues(requestBody.style);
+        let body: Record<string, unknown> = {};
 
         switch (action) {
             case 'create':
                 url = `/v2/boards/${miroBoardId}/frames`;
                 method = 'post';
-                body = {
-                    ...(requestBody.data && { data: requestBody.data }),
-                    ...(normalizedStyle && { style: normalizedStyle }),
-                    ...(normalizedPosition && { position: normalizedPosition }),
-                    ...(normalizedGeometry && { geometry: normalizedGeometry }),
-                };
+                
+                // Clean up position metadata before API call for frames
+                if (normalizedPosition) {
+                    // Remove all internal tracking properties for frames
+                    const cleanedPosition: Record<string, unknown> = {
+                        x: normalizedPosition.x,
+                        y: normalizedPosition.y,
+                        origin: normalizedPosition.origin || 'center'
+                    };
+                    
+                    body = {
+                        ...(requestBody.data && { data: requestBody.data }),
+                        ...(normalizedStyle && { style: normalizedStyle }),
+                        position: cleanedPosition,
+                        ...(normalizedGeometry && { geometry: normalizedGeometry }),
+                    };
+                } else {
+                    body = {
+                        ...(requestBody.data && { data: requestBody.data }),
+                        ...(normalizedStyle && { style: normalizedStyle }),
+                        ...(normalizedGeometry && { geometry: normalizedGeometry }),
+                    };
+                }
                 break;
             case 'get_all':
                 // Get all frames on the board by using the items endpoint with type=frame
@@ -159,12 +174,29 @@ FRAME-SPECIFIC NOTES: Frame deletion will not delete its contained items - they 
             case 'update':
                 url = `/v2/boards/${miroBoardId}/frames/${item_id}`;
                 method = 'patch';
-                body = {
-                    ...(requestBody.data && { data: requestBody.data }),
-                    ...(normalizedStyle && { style: normalizedStyle }),
-                    ...(normalizedPosition && { position: normalizedPosition }),
-                    ...(normalizedGeometry && { geometry: normalizedGeometry }),
-                };
+                
+                // Clean up position metadata before API call for frames
+                if (normalizedPosition) {
+                    // Remove all internal tracking properties for frames
+                    const cleanedPosition: Record<string, unknown> = {
+                        x: normalizedPosition.x,
+                        y: normalizedPosition.y,
+                        origin: normalizedPosition.origin || 'center'
+                    };
+                    
+                    body = {
+                        ...(requestBody.data && { data: requestBody.data }),
+                        ...(normalizedStyle && { style: normalizedStyle }),
+                        position: cleanedPosition,
+                        ...(normalizedGeometry && { geometry: normalizedGeometry }),
+                    };
+                } else {
+                    body = {
+                        ...(requestBody.data && { data: requestBody.data }),
+                        ...(normalizedStyle && { style: normalizedStyle }),
+                        ...(normalizedGeometry && { geometry: normalizedGeometry }),
+                    };
+                }
                 break;
             case 'delete':
                 url = `/v2/boards/${miroBoardId}/frames/${item_id}`;
@@ -215,19 +247,31 @@ FRAME-SPECIFIC NOTES: Frame deletion will not delete its contained items - they 
                         status: number; 
                         data?: { 
                             message?: string; 
-                            error?: string; 
+                            error?: string;
+                            context?: {
+                                fields?: Array<{field: string, message: string}>
+                            }
                         } 
                     } 
                 }).response;
+                
                 if (errorResponse?.status === 400) {
                     const errorData = errorResponse.data;
                     const errorMessage = errorData?.message || errorData?.error || JSON.stringify(errorData);
+                    const fields = errorData?.context?.fields || [];
                     
                     // Check for position-related errors
                     if (typeof errorMessage === 'string' && 
                         (errorMessage.includes('position') || errorMessage.includes('outside of parent'))) {
                         
                         return formatApiError(error, `Position Error: ${errorMessage}. For frames, use "relativeTo": "canvas_center". When positioning items inside frames, use "relativeTo": "parent_top_left" and ensure coordinates are within the frame's bounds.`);
+                    }
+                    
+                    // Check for specific field errors related to positioning
+                    for (const field of fields) {
+                        if (field.field.startsWith('position.')) {
+                            return formatApiError(error, `Position Error on field ${field.field}: ${field.message}. Position properties for Miro API are limited to x, y, and origin.`);
+                        }
                     }
                 }
             }

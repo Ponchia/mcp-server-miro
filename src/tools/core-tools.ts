@@ -58,7 +58,21 @@ ${MCP_POSITIONING_GUIDE}`,
                     // Get parent ID to retrieve its geometry later if needed
                     const parentId = normalizedItem.parent.id;
                     console.log(`Item with parent ${parentId} will use position relative to parent`);
+                    
+                    // Parent-relative positioning is complex with bulk creation
+                    // We'll need to convert coordinates to parent_top_left format
+                    console.log(`Bulk creation: Coordinates for items in parent frames should use parent_top_left format`);
+                    console.log(`For advanced positioning, use individual item creation instead of bulk creation`);
                 }
+                
+                // Clean up position data - ensure only API-compatible properties remain
+                const position = normalizedItem.position as Record<string, unknown>;
+                const cleanedPosition: Record<string, unknown> = {
+                    x: position.x,
+                    y: position.y,
+                    origin: position.origin || 'center'
+                };
+                normalizedItem.position = cleanedPosition as typeof normalizedItem.position;
             }
             
             // Sanitize style objects - remove unsupported properties
@@ -259,6 +273,52 @@ LIMITATIONS: Connectors cannot be assigned to parent frames. Frames cannot be ne
         
         // Normalize position values
         const normalizedPosition = normalizePositionValues(requestBody.position);
+        
+        // If we have parent-relative positioning, we need to translate coordinates
+        if (normalizedPosition && requestBody.parent?.id && parentGeometry) {
+            // Check what reference system was being used (stored during normalization)
+            const refSystem = normalizedPosition.__refSystem as string || 'parent_top_left';
+            
+            // Get parent dimensions
+            const parentWidth = parentGeometry.width || 0;
+            const parentHeight = parentGeometry.height || 0;
+            
+            console.log(`Translating coordinates from ${refSystem} to parent_top_left (API format)`);
+            console.log(`Parent dimensions: ${parentWidth}x${parentHeight}`);
+            
+            // Original coordinates
+            const x = normalizedPosition.x as number;
+            const y = normalizedPosition.y as number;
+            
+            // Transform coordinates based on reference system
+            if (refSystem === 'parent_center') {
+                // Convert from parent center to parent top-left
+                normalizedPosition.x = x + (parentWidth / 2);
+                normalizedPosition.y = y + (parentHeight / 2);
+                console.log(`Translated from parent_center: (${x},${y}) -> (${normalizedPosition.x},${normalizedPosition.y})`);
+            } 
+            else if (refSystem === 'parent_bottom_right') {
+                // Convert from parent bottom-right to parent top-left
+                normalizedPosition.x = parentWidth - x;
+                normalizedPosition.y = parentHeight - y;
+                console.log(`Translated from parent_bottom_right: (${x},${y}) -> (${normalizedPosition.x},${normalizedPosition.y})`);
+            } 
+            else if (refSystem === 'parent_percentage') {
+                // Convert from percentage to absolute values based on parent dimensions
+                normalizedPosition.x = (x / 100) * parentWidth;
+                normalizedPosition.y = (y / 100) * parentHeight;
+                console.log(`Translated from parent_percentage: (${x}%,${y}%) -> (${normalizedPosition.x},${normalizedPosition.y})`);
+            }
+            
+            // Remove all internal tracking properties before API call
+            delete normalizedPosition.__refSystem;
+            delete normalizedPosition.__isPercentageX;
+            delete normalizedPosition.__isPercentageY;
+            delete normalizedPosition.__originalX;
+            delete normalizedPosition.__originalY;
+            
+            // parent_top_left is already in the format Miro expects, no translation needed
+        }
         
         // Handle data conversion if necessary
         const patchData: Record<string, unknown> = {

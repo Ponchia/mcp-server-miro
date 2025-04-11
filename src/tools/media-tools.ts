@@ -95,17 +95,109 @@ For creation, the data.url parameter is required. Images and documents maintain 
         // Normalize position values
         const normalizedPosition = normalizePositionValues(position);
 
+        // If we have parent-relative positioning, we need to translate coordinates
+        if (normalizedPosition && parent?.id) {
+            try {
+                // Get parent item to retrieve its dimensions
+                const parentResponse = await miroClient.get(`/v2/boards/${miroBoardId}/items/${parent.id}`);
+                const parentGeometry = parentResponse.data.geometry;
+                
+                if (parentGeometry) {
+                    // Get reference system
+                    const refSystem = normalizedPosition.__refSystem as string || 'parent_top_left';
+                    
+                    // Get parent dimensions
+                    const parentWidth = parentGeometry.width || 0;
+                    const parentHeight = parentGeometry.height || 0;
+                    
+                    console.log(`Translating media coordinates from ${refSystem} to parent_top_left`);
+                    console.log(`Parent dimensions: ${parentWidth}x${parentHeight}`);
+                    
+                    // Original coordinates
+                    const x = normalizedPosition.x as number;
+                    const y = normalizedPosition.y as number;
+                    
+                    // Transform coordinates based on reference system
+                    if (refSystem === 'parent_center') {
+                        normalizedPosition.x = x + (parentWidth / 2);
+                        normalizedPosition.y = y + (parentHeight / 2);
+                    } 
+                    else if (refSystem === 'parent_bottom_right') {
+                        normalizedPosition.x = parentWidth - x;
+                        normalizedPosition.y = parentHeight - y;
+                    } 
+                    else if (refSystem === 'parent_percentage') {
+                        normalizedPosition.x = (x / 100) * parentWidth;
+                        normalizedPosition.y = (y / 100) * parentHeight;
+                    }
+                }
+            } catch (error) {
+                console.error(`Error translating media parent-relative coordinates: ${error}`);
+            }
+        }
+
+        // Clean up position metadata - ensure only API-compatible properties
+        if (normalizedPosition) {
+            const cleanedPosition: Record<string, unknown> = {
+                x: normalizedPosition.x,
+                y: normalizedPosition.y,
+                origin: normalizedPosition.origin || 'center'
+            };
+            
+            // Create body without using spread operators
+            const finalBody: Record<string, unknown> = {};
+            
+            // Add processed data if available
+            if (processedData) {
+                finalBody.data = processedData;
+            }
+            
+            // Add position
+            finalBody.position = cleanedPosition;
+            
+            // Add geometry if available
+            if (processedGeometry) {
+                finalBody.geometry = processedGeometry;
+            }
+            
+            // Add parent if available and has id
+            if (parent && typeof parent === 'object' && 'id' in parent) {
+                finalBody.parent = parent;
+            }
+            
+            body = finalBody;
+        } else {
+            // Create body without using spread operators
+            const finalBody: Record<string, unknown> = {};
+            
+            // Add processed data if available
+            if (processedData) {
+                finalBody.data = processedData;
+            }
+            
+            // Add position if available
+            if (normalizedPosition) {
+                finalBody.position = normalizedPosition;
+            }
+            
+            // Add geometry if available
+            if (processedGeometry) {
+                finalBody.geometry = processedGeometry;
+            }
+            
+            // Add parent if available and has id
+            if (parent && typeof parent === 'object' && 'id' in parent) {
+                finalBody.parent = parent;
+            }
+            
+            body = finalBody;
+        }
+
         // Construct the URL based on action and type
         switch (action) {
             case 'create':
                 url = `/v2/boards/${miroBoardId}/${type}s`;
                 method = 'post';
-                body = {
-                    ...(processedData && { data: processedData }),
-                    ...(normalizedPosition && { position: normalizedPosition }),
-                    ...(processedGeometry && { geometry: processedGeometry }),
-                    ...(parent && { parent }),
-                };
                 break;
             case 'get_all':
                 url = `/v2/boards/${miroBoardId}/items`;
@@ -119,12 +211,6 @@ For creation, the data.url parameter is required. Images and documents maintain 
             case 'update':
                 url = `/v2/boards/${miroBoardId}/${type}s/${item_id}`;
                 method = 'patch';
-                body = {
-                    ...(processedData && { data: processedData }),
-                    ...(normalizedPosition && { position: normalizedPosition }),
-                    ...(processedGeometry && { geometry: processedGeometry }),
-                    ...(parent && { parent }),
-                };
                 break;
             case 'delete':
                 url = `/v2/boards/${miroBoardId}/${type}s/${item_id}`;
