@@ -15,51 +15,29 @@ const containsHtml = (text: string): boolean => {
 };
 
 /**
- * Converts HTML to rich text format that Miro can handle
- * Basic converter that handles common HTML tags
+ * Validates HTML content for Miro compatibility
+ * Miro supports a limited set of HTML tags: <p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>
+ * This function preserves supported tags and sanitizes unsupported ones.
  */
-const convertHtmlToPlainText = (html: string): string => {
+const validateHtmlForMiro = (html: string): string => {
   if (!containsHtml(html)) return html;
   
-  let result = html;
+  // These are the only HTML tags supported by Miro according to their documentation
+  const supportedTags = ['p', 'a', 'strong', 'b', 'em', 'i', 'u', 's', 'span', 'ol', 'ul', 'li', 'br'];
   
-  // Replace heading tags with text and newlines
-  result = result.replace(/<h1[^>]*>(.*?)<\/h1>/gi, '$1\n');
-  result = result.replace(/<h2[^>]*>(.*?)<\/h2>/gi, '$1\n');
-  result = result.replace(/<h3[^>]*>(.*?)<\/h3>/gi, '$1\n');
-  result = result.replace(/<h4[^>]*>(.*?)<\/h4>/gi, '$1\n');
-  result = result.replace(/<h5[^>]*>(.*?)<\/h5>/gi, '$1\n');
-  result = result.replace(/<h6[^>]*>(.*?)<\/h6>/gi, '$1\n');
+  // Define regex to match HTML tags
+  const tagRegex = /<\/?([a-z][a-z0-9]*)\b[^>]*>/gi;
   
-  // Replace paragraph tags
-  result = result.replace(/<p[^>]*>(.*?)<\/p>/gi, '$1\n');
-  
-  // Replace list items
-  result = result.replace(/<li[^>]*>(.*?)<\/li>/gi, '• $1\n');
-  
-  // Replace br tags
-  result = result.replace(/<br\s*\/?>/gi, '\n');
-  
-  // Replace formatting tags
-  result = result.replace(/<b[^>]*>(.*?)<\/b>/gi, '$1');
-  result = result.replace(/<strong[^>]*>(.*?)<\/strong>/gi, '$1');
-  result = result.replace(/<i[^>]*>(.*?)<\/i>/gi, '$1');
-  result = result.replace(/<em[^>]*>(.*?)<\/em>/gi, '$1');
-  
-  // Remove other tags
-  result = result.replace(/<[^>]*>/g, '');
-  
-  // Decode HTML entities
-  result = result.replace(/&amp;/g, '&');
-  result = result.replace(/&lt;/g, '<');
-  result = result.replace(/&gt;/g, '>');
-  result = result.replace(/&quot;/g, '"');
-  result = result.replace(/&#39;/g, "'");
-  
-  // Clean up multiple newlines
-  result = result.replace(/\n\s*\n/g, '\n\n');
-  
-  return result;
+  // Replace HTML tags
+  return html.replace(tagRegex, (match, tagName) => {
+    // If the tag is in our supported list, keep it
+    if (supportedTags.includes(tagName.toLowerCase())) {
+      return match;
+    }
+    
+    // For unsupported tags, escape them so they show as plain text
+    return match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  });
 };
 
 // Schema definitions for content items
@@ -68,8 +46,8 @@ const ContentItemSchema = z.object({
     type: z.enum(['shape', 'text', 'sticky_note']).describe('The type of content item.'),
     item_id: z.string().optional().describe('Item ID (required for get, update, delete actions).'),
     data: z.object({
-        // Generic content properties - allow HTML content with looser validation
-        content: z.string().optional().describe('Text content. For rich text, use Markdown-like formatting (e.g., **bold**, *italic*) or simple newlines. HTML tags will be automatically converted to plain text.'),
+        // Generic content properties
+        content: z.string().optional().describe('Text content. Miro text elements support these HTML tags: <p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>. Example: "<p>This is a <strong>bold</strong> statement.</p>"'),
         // Shape-specific properties
         shape: z.enum(['square', 'rectangle', 'round_rectangle', 'circle', 'triangle', 'rhombus', 
                      'diamond',
@@ -81,10 +59,10 @@ const ContentItemSchema = z.object({
                      'parallelogram', 'trapezoid', 'pentagon', 'hexagon', 'octagon', 
                      'wedge_round_rectangle_callout', 'star', 'flow_chart_predefined_process', 
                      'cloud', 'cross', 'can', 'right_arrow', 'left_arrow', 'left_right_arrow', 
-                     'left_brace', 'right_brace']).optional().describe('Shape type (for shapes and sticky notes).'),
+                     'left_brace', 'right_brace']).optional().describe('Shape type (for shapes only).'),
     }).optional().describe('Content data based on type.'),
     style: z.object({
-        // Generic style properties - allow all for text since we'll convert to shape
+        // Generic style properties
         fillColor: z.union([
             z.string().regex(/^#[0-9a-fA-F]{6}$/),
             z.string().regex(/^#[0-9a-fA-F]{3}$/),
@@ -92,52 +70,52 @@ const ContentItemSchema = z.object({
             z.enum(['gray', 'light_yellow', 'yellow', 'orange', 'light_green', 'green', 
                   'dark_green', 'cyan', 'light_pink', 'pink', 'violet', 'red', 'light_blue', 
                   'blue', 'dark_blue', 'black', 'white', 'transparent'])
-        ]).optional().describe('Background color. Accepts hex colors (with or without #), named colors, or "transparent".'),
-        fillOpacity: z.number().min(0).max(1).optional().describe('Background opacity (0.0-1.0).'),
-        color: z.string().optional().describe('Text color. Accepts hex colors (with or without #) or color names.'),
+        ]).optional().describe('Background color. Examples: "#FF0000" (red), "#00FF00" (green), "blue", "transparent" (default for text).'),
+        fillOpacity: z.number().min(0).max(1).optional().describe('Background opacity from 0.0 (transparent) to 1.0 (solid). Example: 0.5 for semi-transparent.'),
+        color: z.string().optional().describe('Text color. Examples: "#000000" (black), "#FF0000" (red), "blue". Default: "#1a1a1a" (dark gray).'),
         fontFamily: z.enum(['arial', 'abril_fatface', 'bangers', 'eb_garamond', 'georgia', 'graduate', 
                           'gravitas_one', 'fredoka_one', 'nixie_one', 'open_sans', 'permanent_marker', 
                           'pt_sans', 'pt_sans_narrow', 'pt_serif', 'rammetto_one', 'roboto', 
                           'roboto_condensed', 'roboto_slab', 'caveat', 'times_new_roman', 'titan_one', 
                           'lemon_tuesday', 'roboto_mono', 'noto_sans', 'plex_sans', 'plex_serif', 
-                          'plex_mono', 'spoof', 'tiempos_text', 'formular']).optional().describe('Font family.'),
-        fontSize: z.union([z.string(), z.number()]).optional().describe('Font size in dp.'),
-        textAlign: z.enum(['left', 'right', 'center']).optional().describe('Horizontal text alignment.'),
-        textAlignVertical: z.enum(['top', 'middle', 'bottom']).optional().describe('Vertical text alignment.'),
-        // Shape-specific style - also allowed for text since we'll convert to shape
-        borderColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().describe('Border color.'),
+                          'plex_mono', 'spoof', 'tiempos_text', 'formular']).optional().describe('Font family. Examples: "arial", "roboto", "times_new_roman". Default: "arial".'),
+        fontSize: z.union([z.string(), z.number()]).optional().describe('Font size in dp. Examples: 14, "24". Default: 14.'),
+        textAlign: z.enum(['left', 'right', 'center']).optional().describe('Horizontal text alignment. Default: "left".'),
+        textAlignVertical: z.enum(['top', 'middle', 'bottom']).optional().describe('Vertical text alignment. Default: "middle".'),
+        // Shape-specific style properties
+        borderColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().describe('Border color for shapes. Must be a hex color. Example: "#000000" for black border.'),
         borderOpacity: z.union([
             z.string().refine(val => {
                 const num = parseFloat(val);
                 return !isNaN(num) && num >= 0 && num <= 1;
             }, { message: "String opacity must convert to a number between 0 and 1" }),
             z.number().min(0).max(1)
-        ]).optional().describe('Border opacity (0.0-1.0).'),
-        borderStyle: z.enum(['normal', 'dotted', 'dashed']).optional().describe('Border style.'),
+        ]).optional().describe('Border opacity from 0.0 (transparent) to 1.0 (solid). Example: 0.5 for semi-transparent.'),
+        borderStyle: z.enum(['normal', 'dotted', 'dashed']).optional().describe('Border style for shapes. Default: "normal".'),
         borderWidth: z.union([
             z.string().refine(val => {
                 const num = parseFloat(val);
                 return !isNaN(num) && num >= 0 && num <= 24;
             }, { message: "String border width must convert to a number between 0 and 24" }),
             z.number().min(0).max(24)
-        ]).optional().describe('Border width.'),
+        ]).optional().describe('Border width in dp (0-24). Example: 2 for a thin border. Default: 1.'),
         // Accept additional style properties that might not be directly supported by Miro
         fontWeight: z.string().optional().describe('Font weight (not directly supported by Miro API).'),
         // Also allow "content" in style since shapes need it there
-        content: z.string().optional().describe('Text content for shapes.'),
-    }).optional().describe('Styling options.'),
+        content: z.string().optional().describe('Alternative location for text content (for shapes).'),
+    }).optional().describe('Styling options. Use appropriate properties for each item type. Text items support color, fontFamily, fontSize, textAlign. Shapes support all style properties. Sticky notes only support specific named colors (not hex).'),
     position: z.object({
-        x: z.number().describe('X-axis coordinate.'),
-        y: z.number().describe('Y-axis coordinate.'),
-        origin: z.enum(['center']).optional().describe('Origin point for coordinates.'),
-        relativeTo: z.enum(['canvas_center', 'parent_top_left']).optional().describe('Coordinate system reference.')
-    }).optional().describe('Position on the board.'),
+        x: z.number().describe('X-axis coordinate in dp. Example: 0 for center of board.'),
+        y: z.number().describe('Y-axis coordinate in dp. Example: 0 for center of board.'),
+        origin: z.enum(['center']).optional().describe('Origin point for coordinates. Default: "center".'),
+        relativeTo: z.enum(['canvas_center', 'parent_top_left']).optional().describe('Coordinate system reference. Default: "canvas_center".')
+    }).optional().describe('Position on the board. If omitted, item will be placed at center of the board.'),
     geometry: z.object({
-        width: z.number().optional().describe('Width in pixels.'),
-        height: z.number().optional().describe('Height in pixels.'),
-        rotation: z.number().optional().describe('Rotation angle in degrees.'),
-    }).optional().describe('Dimensions and rotation.'),
-    parent: z.object({ id: z.string() }).optional().describe('Parent frame ID.')
+        width: z.number().optional().describe('Width in dp. Example: 200. Default for text: 105.'),
+        height: z.number().optional().describe('Height in dp. Example: 100. For text items, height is calculated automatically.'),
+        rotation: z.number().optional().describe('Rotation angle in degrees. Example: 45 for a 45-degree rotation. Default: 0.'),
+    }).optional().describe('Dimensions and rotation. If omitted, default sizing is applied.'),
+    parent: z.object({ id: z.string() }).optional().describe('Parent frame ID to place this item inside a frame.')
 }).refine(
     data => !(['get', 'update', 'delete'].includes(data.action)) || data.item_id, 
     { message: 'item_id is required for get, update, and delete actions', path: ['item_id'] }
@@ -151,72 +129,71 @@ type ContentItemParams = z.infer<typeof ContentItemSchema>;
 // Implementation of content item operations tool
 export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
     name: 'mcp_miro_content_item_operations',
-    description: 'Creates and manages text-based content on Miro boards including rich text, shapes with text, and sticky notes. Use this tool to: (1) create - add new text elements, shapes, or sticky notes with custom formatting, (2) get - retrieve a specific content item\'s details, (3) get_all - list all items of a specific type, (4) update - modify existing items\' content or appearance, (5) delete - remove items entirely. Text content should use simple text formatting with newlines for structure - HTML is not directly supported and will be converted to plain text. Shapes come in 25+ variations (rectangles, circles, arrows, etc.) and can contain text. Sticky notes only support specific named colors (like "yellow", "blue", "green"), not hex values. All items can be customized with fonts, borders, and precise positioning. Text elements are automatically converted to rectangle shapes to ensure proper sizing and positioning. Items can be placed anywhere on the board or within frames.',
+    description: `Creates and manages content on Miro boards including text, shapes with text, and sticky notes.
+
+ACTIONS:
+(1) CREATE - Add new items with specified properties:
+   - Text: Supports basic HTML formatting (<p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>)
+   - Shapes: 25+ types (rectangle, circle, arrow, etc.) with customizable borders, fill colors
+   - Sticky notes: Simple colored notes (limited to named colors like "yellow", "blue", "green")
+
+(2) GET - Retrieve a specific item's details
+(3) GET_ALL - List all items of a specific type
+(4) UPDATE - Modify existing items' content or appearance
+(5) DELETE - Remove items entirely
+
+STYLING EXAMPLES:
+- Text: {color: "#FF0000", fontFamily: "roboto", fontSize: 18, textAlign: "center"}
+- Shape: {fillColor: "#E6F9FF", fillOpacity: 0.5, borderColor: "#0000FF", borderWidth: 2}
+- Sticky note: {fillColor: "yellow"} (only accepts named colors, not hex values)
+
+POSITIONING: 
+- All items can be precisely positioned with x/y coordinates
+- Default position is the center of the board if not specified
+- Can be placed inside frames using the parent parameter
+
+For all items, omitted parameters will use reasonable defaults. For sticky notes, only specific named colors are supported, not hex values.`,
     parameters: ContentItemSchema,
     execute: async (args) => {
         console.log(`Content Item Operation: ${JSON.stringify(args, null, 2)}`);
-        const { action, item_id } = args;
-        let { type, data, geometry, parent } = args;
+        const { action, item_id, type, geometry, parent } = args;
+        let { data } = args;
         const style = args.style;
         let url = '';
         let method = '';
         let queryParams: Record<string, string> = {};
-        let body: Record<string, unknown> = {};
-        let skipBodyConstruction = false;
+        const body: Record<string, unknown> = {};
 
-        // Preprocess any HTML content to plain text for Miro compatibility
+        // Validate HTML content for Miro compatibility
         if (data?.content && containsHtml(data.content)) {
-            console.log(`HTML content detected. Converting to plain text for Miro compatibility.`);
+            console.log(`HTML content detected. Validating for Miro compatibility.`);
             const originalContent = data.content;
-            data = { ...data, content: convertHtmlToPlainText(data.content) };
-            console.log(`Converted HTML content:
-              Original: "${originalContent.substring(0, 50)}${originalContent.length > 50 ? '...' : ''}"
-              Converted: "${data.content.substring(0, 50)}${data.content.length > 50 ? '...' : ''}"
-            `);
+            data = { ...data, content: validateHtmlForMiro(data.content) };
+            
+            if (data.content !== originalContent) {
+                console.log(`Modified HTML content to use only Miro-supported tags (<p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>).`);
+            }
         }
 
-        // ALWAYS convert text to shape, regardless of action
-        // This ensures we maintain control over sizing and positioning
-        const forcedShapeConversion = type === 'text';
-        if (forcedShapeConversion) {
-            console.log(`IMPORTANT: Always converting 'text' elements to 'shape' elements with dashed borders.
-            This is a deliberate strategy to avoid Miro's text sizing issues.
-            All text content will be wrapped in a rectangle with proper dimensions.`);
+        // Process text elements properly
+        if (type === 'text') {
+            console.log(`Handling native text element. Miro text elements support a limited set of HTML tags.`);
             
-            // Step 1.1: Check if parent frame exists (if specified)
-            let frameInfo: { width: number; height: number; x: number; y: number } | null = null;
-
+            // Check if parent frame exists (if specified)
             if (parent && parent.id) {
                 try {
                     console.log(`Verifying parent frame exists: ${parent.id}`);
                     const frameCheckUrl = `/v2/boards/${miroBoardId}/frames/${parent.id}`;
                     try {
-                        const frameResponse = await miroClient.get(frameCheckUrl);
+                        await miroClient.get(frameCheckUrl);
                         console.log(`Parent frame exists: ${parent.id}`);
-                        
-                        // Store frame dimensions for boundary checking
-                        const frameData = frameResponse.data;
-                        const frameWidth = frameData.geometry?.width || 0;
-                        const frameHeight = frameData.geometry?.height || 0;
-                        const frameX = frameData.position?.x || 0;
-                        const frameY = frameData.position?.y || 0;
-                        
-                        console.log(`Frame dimensions: width=${frameWidth}, height=${frameHeight}, position=(${frameX}, ${frameY})`);
-                        
-                        // Save frame info for position adjustment later
-                        frameInfo = {
-                            width: frameWidth,
-                            height: frameHeight,
-                            x: frameX,
-                            y: frameY
-                        };
                     } catch (error) {
                         // If frame doesn't exist, log warning and continue without parent
                         const errorMessage = error instanceof Error ? error.message : String(error);
                         console.warn(`Parent frame with ID ${parent.id} doesn't exist or is not accessible: ${errorMessage}`);
                         
                         // Remove parent from the request to prevent API errors
-                        parent = undefined;
+                        delete body.parent;
                     }
                 } catch (frameError) {
                     console.error(`Parent frame check failed: ${frameError}`);
@@ -224,36 +201,18 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
                 }
             }
             
-            // Extract the text content from data
-            const textContent = data?.content || '';
+            // For text elements, ensure we have the content in the right place
+            if (data && !data.content && style?.content) {
+                data = { ...data, content: style.content };
+            }
             
-            // Change the type from text to shape
-            type = 'shape';
-            
-            // Create the proper shape data object
-            data = {
-                shape: 'rectangle',  // Rectangle with dashed border
-                content: textContent // Text content goes in data.content
-            };
-            
-            // Create a clean style object for the shape
-            const styleToUse = style || {};
-            
-            // Create a properly structured style object according to Miro API
-            // Ensure all numeric values are formatted as strings with decimal points
-            const textStyle: Record<string, unknown> = {};
-            
-            // Helper function to validate and normalize color properties with better logging
+            // Helper function to normalize color value formatting
             const normalizeColor = (colorValue: unknown): string => {
-                console.log(`Normalizing color: ${colorValue} (type: ${typeof colorValue})`);
-                
                 if (!colorValue) {
-                    console.log(`No color provided, using default black (#1a1a1a)`);
                     return '#1a1a1a'; // Default black
                 }
                 
                 if (colorValue === 'transparent') {
-                    console.log(`Color is 'transparent', keeping as is`);
                     return 'transparent';
                 }
                 
@@ -263,7 +222,6 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
                     
                     // If it's already a valid hex color, use it
                     if (lowerColor.match(/^#[0-9a-f]{6}$/)) {
-                        console.log(`Valid lowercase hex color detected: ${lowerColor}`);
                         return lowerColor;
                     }
                     
@@ -282,32 +240,21 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
                     };
                     
                     if (colorMap[lowerColor]) {
-                        console.log(`Color name '${lowerColor}' mapped to ${colorMap[lowerColor]}`);
                         return colorMap[lowerColor];
                     }
                     
                     // Handle shortened hex format (#RGB)
                     if (lowerColor.match(/^#[0-9a-f]{3}$/)) {
-                        const expanded = `#${lowerColor[1]}${lowerColor[1]}${lowerColor[2]}${lowerColor[2]}${lowerColor[3]}${lowerColor[3]}`;
-                        console.log(`Short hex color ${lowerColor} expanded to ${expanded}`);
-                        return expanded;
+                        return `#${lowerColor[1]}${lowerColor[1]}${lowerColor[2]}${lowerColor[2]}${lowerColor[3]}${lowerColor[3]}`;
                     }
                     
                     // Handle RGB format without # (add the #)
                     if (lowerColor.match(/^[0-9a-f]{6}$/)) {
-                        console.log(`Adding # prefix to hex color: ${lowerColor} -> #${lowerColor}`);
                         return `#${lowerColor}`;
-                    }
-                    
-                    // Handle hex codes with uppercase letters
-                    if (colorValue.match(/^#[0-9A-Fa-f]{6}$/)) {
-                        console.log(`Converting uppercase hex to lowercase: ${colorValue} -> ${lowerColor}`);
-                        return lowerColor;
                     }
                 }
                 
-                console.log(`Unrecognized color format: ${colorValue}, using default (#1a1a1a)`);
-                return '#1a1a1a';
+                return '#1a1a1a'; // Default
             };
             
             // Helper function to normalize font family names
@@ -329,18 +276,16 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
                 // Direct match
                 const fontLower = fontFamily.toLowerCase();
                 if (supportedFonts.includes(fontLower)) {
-                    console.log(`Font family matched directly: ${fontLower}`);
                     return fontLower;
                 }
                 
                 // Check for close matches with underscores vs hyphens or spaces
                 const fontNoSpaces = fontLower.replace(/[-\s]/g, '_');
                 if (supportedFonts.includes(fontNoSpaces)) {
-                    console.log(`Font family normalized: ${fontFamily} -> ${fontNoSpaces}`);
                     return fontNoSpaces;
                 }
                 
-                // Common font family mappings that LLMs might use
+                // Common font family mappings
                 const fontMap: Record<string, string> = {
                     'permanentmarker': 'permanent_marker',
                     'roboto': 'roboto',
@@ -356,365 +301,81 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
                 
                 const fontNoSpecialChars = fontLower.replace(/[^a-z0-9]/g, '');
                 if (fontMap[fontNoSpecialChars]) {
-                    console.log(`Font family mapped: ${fontFamily} -> ${fontMap[fontNoSpecialChars]}`);
                     return fontMap[fontNoSpecialChars];
                 }
                 
-                // Fallback to default if no match found
-                console.log(`Font family not recognized: ${fontFamily}, using default (arial)`);
-                return 'arial';
+                return 'arial'; // Default
             };
             
-            // Text styling with proper normalization
-            console.log(`Original style object: ${JSON.stringify(styleToUse, null, 2)}`);
-
-            textStyle.color = normalizeColor(styleToUse.color);
-            textStyle.fontSize = styleToUse.fontSize 
-                ? String(typeof styleToUse.fontSize === 'string' ? styleToUse.fontSize : styleToUse.fontSize)
-                : '14';
-            textStyle.fontFamily = normalizeFontFamily(styleToUse.fontFamily);
-            textStyle.textAlign = styleToUse.textAlign || 'center';
-            textStyle.textAlignVertical = 'top';
-            
-            // Border styling - dashed border for visual clarity
-            textStyle.borderStyle = 'dashed';
-            textStyle.borderWidth = '1.0';
-            textStyle.borderOpacity = '1.0';
-            textStyle.borderColor = normalizeColor(styleToUse.borderColor || '#888888');
-            
-            // Fill styling with proper handling of special values
-            if (styleToUse.fillColor === 'transparent') {
-                textStyle.fillColor = 'transparent';
+            // Process and normalize text styles
+            if (style) {
+                const textStyle: Record<string, unknown> = {};
+                
+                // Text color
+                if (style.color) {
+                    textStyle.color = normalizeColor(style.color);
+                }
+                
+                // Font properties
+                if (style.fontFamily) {
+                    textStyle.fontFamily = normalizeFontFamily(style.fontFamily);
+                }
+                
+                if (style.fontSize) {
+                    textStyle.fontSize = typeof style.fontSize === 'number' ? 
+                        String(style.fontSize) : style.fontSize;
+                }
+                
+                // Text alignment
+                if (style.textAlign) {
+                    textStyle.textAlign = style.textAlign;
+                }
+                
+                // Fill properties (background)
+                if (style.fillColor) {
+                    textStyle.fillColor = normalizeColor(style.fillColor);
+                }
+                
+                if (typeof style.fillOpacity !== 'undefined') {
+                    textStyle.fillOpacity = style.fillOpacity;
+                }
+                
+                // For native text elements in Miro, we don't need border properties
+                // as they're not supported for text elements
+                
+                // Apply the normalized style
+                body.style = textStyle;
             } else {
-                textStyle.fillColor = normalizeColor(styleToUse.fillColor || '#ffffff');
+                // Set reasonable defaults for text if no style is provided
+                body.style = {
+                    color: '#1a1a1a',
+                    fontFamily: 'arial',
+                    fontSize: '14',
+                    textAlign: 'left',
+                    fillColor: 'transparent'
+                };
             }
-            
-            // Handle various opacity format possibilities
-            if (styleToUse.fillOpacity !== undefined) {
-                // Could be number, string with or without decimal point
-                if (typeof styleToUse.fillOpacity === 'number') {
-                    textStyle.fillOpacity = String(styleToUse.fillOpacity);
-                } else if (typeof styleToUse.fillOpacity === 'string') {
-                    // Ensure string is properly formatted (e.g., "0.5" not ".5")
-                    const numValue = parseFloat(styleToUse.fillOpacity);
-                    if (!isNaN(numValue)) {
-                        textStyle.fillOpacity = String(numValue);
-                    } else {
-                        textStyle.fillOpacity = '0.01'; // Default if parsing fails
-                    }
-                } else {
-                    textStyle.fillOpacity = '0.01'; // Default for unexpected types
-                }
-            } else {
-                textStyle.fillOpacity = '0.01'; // Default if not specified
-            }
-            
-            // Full validation of all style properties against Miro's expectations
-            try {
-                // Validate color values are properly formatted
-                if (textStyle.color && typeof textStyle.color === 'string' && !textStyle.color.match(/^#[0-9a-f]{6}$/)) {
-                    textStyle.color = normalizeColor(textStyle.color);
-                    console.log(`Re-normalized problematic color value to: ${textStyle.color}`);
-                }
-                
-                // Validate text alignment
-                if (textStyle.textAlign && 
-                    typeof textStyle.textAlign === 'string' && 
-                    !['left', 'center', 'right'].includes(textStyle.textAlign.toLowerCase())) {
-                    textStyle.textAlign = 'center'; // Default to center if invalid
-                    console.log(`Invalid textAlign value, defaulting to center`);
-                }
-                
-                // Convert any numeric values to strings for consistent API format
-                if (typeof textStyle.fontSize === 'number') {
-                    textStyle.fontSize = String(textStyle.fontSize);
-                }
-                
-                // Log final validated style
-                console.log(`Normalized style object for Miro API: ${JSON.stringify(textStyle, null, 2)}`);
-            } catch (styleError) {
-                console.error(`Error validating style properties: ${styleError}`);
-                // Continue with best-effort style object
-            }
-            
-            // When we find HTML in content, adjust size to accommodate it better
-            const hasHtml = textContent.includes('<') && textContent.includes('>');
-            const hasInlineStyles = textContent.includes('style=');
-            console.log(`Content analysis:
-              - Contains HTML-like tags: ${hasHtml ? 'Yes' : 'No'}
-              - Contains inline styles: ${hasInlineStyles ? 'Yes' : 'No'}
-            `);
-            
-            // Log debug info for complex HTML analysis
-            if (hasHtml) {
-                // Count different HTML elements to better understand the content
-                const headerTags = (textContent.match(/<h[1-6][^>]*>/g) || []).length;
-                const paragraphs = (textContent.match(/<p[^>]*>/g) || []).length;
-                const spans = (textContent.match(/<span[^>]*>/g) || []).length;
-                const strongs = (textContent.match(/<strong[^>]*>/g) || []).length;
-                const listItems = (textContent.match(/<li[^>]*>/g) || []).length;
-                const unorderedLists = (textContent.match(/<ul[^>]*>/g) || []).length;
-                const orderedLists = (textContent.match(/<ol[^>]*>/g) || []).length;
-                
-                // Count newlines in the content as they often indicate more vertical space needed
-                const newlines = (textContent.match(/\n/g) || []).length;
-                
-                console.log(`HTML Content Analysis:
-                - Header tags: ${headerTags}
-                - Paragraphs: ${paragraphs}
-                - Spans: ${spans}
-                - Strong/bold elements: ${strongs}
-                - List items: ${listItems}
-                - Unordered lists: ${unorderedLists}
-                - Ordered lists: ${orderedLists}
-                - Newlines: ${newlines}
-                `);
-                
-                // Estimate total "block elements" that need vertical space
-                const totalBlockElements = headerTags + paragraphs + listItems + unorderedLists + orderedLists + Math.floor(newlines / 2);
-                console.log(`Estimated total block elements requiring vertical space: ${totalBlockElements}`);
-            }
-            
-            // Set appropriate dimensions if not provided
-            if (!geometry) {
-                // Calculate size based on text length and fontSize
-                const textLength = textContent.toString().length;
-                const fontSize = typeof textStyle.fontSize === 'string' ? 
-                    parseFloat(textStyle.fontSize) : 14;
-                
-                // For HTML content, we need more width to render properly
-                let estimatedWidth = Math.max(120, textLength * (fontSize * 0.6));
-                let estimatedHeight = Math.max(40, fontSize * 2); // Height proportional to font size
-                
-                // Adjust for HTML content if present
-                if (hasHtml) {
-                    // Count block elements for a better height estimate
-                    const blockElements = (textContent.match(/<(h1|h2|h3|h4|h5|h6|p|div|blockquote)/g) || []).length;
-                    const listItems = (textContent.match(/<li[^>]*>/g) || []).length;
-                    const lists = ((textContent.match(/<ul[^>]*>/g) || []).length) + ((textContent.match(/<ol[^>]*>/g) || []).length);
-                    const newlines = (textContent.match(/\n/g) || []).length;
-                    
-                    // Calculate a better estimate of total vertical elements
-                    const totalVerticalElements = blockElements + listItems + lists + Math.floor(newlines / 2);
-                    console.log(`Total vertical elements for height calculation: ${totalVerticalElements}`);
-                    
-                    // Process inline styles if present
-                    if (hasInlineStyles) {
-                        // Check for font size specifications in inline styles
-                        const inlineStyleFontSizes = textContent.match(/font-size:\s*(\d+)px/g);
-                        if (inlineStyleFontSizes && inlineStyleFontSizes.length > 0) {
-                            // Extract the largest font size from inline styles
-                            const fontSizes = inlineStyleFontSizes.map(style => {
-                                const match = style.match(/font-size:\s*(\d+)px/);
-                                return match ? parseInt(match[1], 10) : 0;
-                            });
-                            
-                            const maxInlineFontSize = Math.max(...fontSizes, 0);
-                            if (maxInlineFontSize > 0) {
-                                // Use the largest inline font size for calculations
-                                const listMultiplier = listItems > 0 ? 1.3 : 1.0;
-                                estimatedHeight = Math.max(estimatedHeight, (totalVerticalElements + 1) * maxInlineFontSize * 1.8 * listMultiplier);
-                            } else {
-                                // Default height calculation with list multiplier
-                                const listMultiplier = listItems > 0 ? 1.4 : 1.0;
-                                estimatedHeight = Math.max(estimatedHeight, (totalVerticalElements + 1) * fontSize * 2.2 * listMultiplier);
-                            }
-                        } else {
-                            // No specific font sizes found
-                            const listMultiplier = listItems > 0 ? 1.4 : 1.0;
-                            estimatedHeight = Math.max(estimatedHeight, (totalVerticalElements + 1) * fontSize * 2.2 * listMultiplier);
-                        }
-                    } else {
-                        // No inline styles
-                        const listMultiplier = listItems > 0 ? 1.5 : 1.0;
-                        estimatedHeight = Math.max(estimatedHeight, (totalVerticalElements + 1) * fontSize * 2.5 * listMultiplier);
-                    }
-                    
-                    // Add extra height for content with lots of list items
-                    if (listItems > 5) {
-                        // For many list items, add even more extra space
-                        estimatedHeight += listItems * fontSize * 0.7;
-                    }
-                    
-                    // For content with both lists and paragraphs, add extra spacing for visual separation
-                    if (listItems > 0 && (blockElements - lists) > 0) {
-                        estimatedHeight += Math.min(lists, (blockElements - lists)) * fontSize * 1.2;
-                    }
-                    
-                    // HTML with complex content needs more width too
-                    estimatedWidth = Math.max(estimatedWidth, 300);
-                }
-                
-                geometry = {
-                    width: estimatedWidth,
-                    height: estimatedHeight
+        } else {
+            // For non-text elements (shapes, sticky notes), use the original normalization
+            const normalizedStyle = normalizeStyleValues(style);
+            if (normalizedStyle) {
+                body.style = normalizedStyle;
+            } else if (type === 'sticky_note') {
+                // Set default for sticky notes if no style is provided
+                body.style = {
+                    fillColor: 'yellow'
+                };
+            } else if (type === 'shape') {
+                // Set reasonable defaults for shapes if no style is provided
+                body.style = {
+                    fillColor: '#ffffff',
+                    fillOpacity: 1,
+                    borderColor: '#1a1a1a',
+                    borderWidth: 1,
+                    borderStyle: 'normal'
                 };
             }
             
-            // Adjust position.relativeTo if parent is specified
-            let positionToUse = args.position || { x: 0, y: 0 };
-            if (parent && parent.id && positionToUse) {
-                // Clone the position object
-                positionToUse = { ...positionToUse };
-                
-                // For items inside frames, positions should be relative to parent_top_left
-                if (positionToUse.relativeTo === 'canvas_center') {
-                    console.log('Adjusting position reference for parent frame: changing relativeTo from canvas_center to parent_top_left');
-                    positionToUse.relativeTo = 'parent_top_left';
-                    
-                    // Calculate item dimensions for boundary checks
-                    const itemWidth = geometry?.width || 100; // Default if not specified
-                    const itemHeight = geometry?.height || 50; // Default if not specified
-                    
-                    if (frameInfo) {
-                        // Get frame dimensions
-                        const frameWidth = frameInfo.width;
-                        const frameHeight = frameInfo.height;
-                        
-                        // Three options for handling position:
-                        // 1. Try to keep the original relative position but ensure it's within boundaries
-                        // 2. Center the item in the frame (if original position is problematic)
-                        // 3. Use a smart position that places item in a visually appealing location
-                        
-                        // For simplicity, we'll use a combination of approaches:
-                        
-                        // Ensure padding from frame edges (10% of frame width/height)
-                        const paddingX = frameWidth * 0.1;
-                        const paddingY = frameHeight * 0.1;
-                        
-                        // Calculate valid position range to keep item fully within frame
-                        const minX = paddingX;
-                        const maxX = frameWidth - itemWidth - paddingX;
-                        const minY = paddingY;
-                        const maxY = frameHeight - itemHeight - paddingY;
-                        
-                        console.log(`Valid position range: X(${minX}:${maxX}), Y(${minY}:${maxY})`);
-                        
-                        // Option 1: Try to map the canvas_center coordinates to parent_top_left
-                        // This is a simplified conversion - we'll just use the center or top of the frame
-                        if (maxX >= minX && maxY >= minY) {
-                            // Frame is big enough to contain the item
-                            positionToUse.x = frameWidth / 2 - itemWidth / 2; // Center horizontally
-                            positionToUse.y = Math.min(paddingY * 2, maxY);   // Near the top with padding
-                            
-                            console.log(`Positioned item at (${positionToUse.x}, ${positionToUse.y}) within parent frame`);
-                        } else {
-                            // Frame is too small for the item - center it and let Miro handle it
-                            positionToUse.x = frameWidth / 2;
-                            positionToUse.y = frameHeight / 2;
-                            console.log(`Frame too small for item. Using center position and letting Miro adjust.`);
-                        }
-                    }
-                }
-            }
-            
-            // If the user only provided width but not height, calculate an appropriate height
-            if (geometry && geometry.width && !geometry.height) {
-                console.log(`User provided width (${geometry.width}) but no height. Calculating appropriate height.`);
-                
-                // Get font size
-                const fontSize = typeof textStyle.fontSize === 'string' ? 
-                    parseFloat(textStyle.fontSize) : 14;
-                
-                let calculatedHeight = Math.max(40, fontSize * 2);
-                
-                // Adjust for HTML content if present
-                if (hasHtml) {
-                    // Count block elements for a better height estimate
-                    const blockElements = (textContent.match(/<(h1|h2|h3|h4|h5|h6|p|div|blockquote)/g) || []).length;
-                    const listItems = (textContent.match(/<li[^>]*>/g) || []).length;
-                    const lists = ((textContent.match(/<ul[^>]*>/g) || []).length) + ((textContent.match(/<ol[^>]*>/g) || []).length);
-                    const newlines = (textContent.match(/\n/g) || []).length;
-                    
-                    // Calculate a better estimate of total vertical elements
-                    const totalVerticalElements = blockElements + listItems + lists + Math.floor(newlines / 2);
-                    console.log(`Total vertical elements for height calculation: ${totalVerticalElements}`);
-                    
-                    // Process inline styles if present
-                    if (hasInlineStyles) {
-                        // Check for font size specifications in inline styles
-                        const inlineStyleFontSizes = textContent.match(/font-size:\s*(\d+)px/g);
-                        if (inlineStyleFontSizes && inlineStyleFontSizes.length > 0) {
-                            // Extract the largest font size from inline styles
-                            const fontSizes = inlineStyleFontSizes.map(style => {
-                                const match = style.match(/font-size:\s*(\d+)px/);
-                                return match ? parseInt(match[1], 10) : 0;
-                            });
-                            
-                            const maxInlineFontSize = Math.max(...fontSizes, 0);
-                            if (maxInlineFontSize > 0) {
-                                // Use the largest inline font size for calculations
-                                const listMultiplier = listItems > 0 ? 1.3 : 1.0;
-                                calculatedHeight = Math.max(calculatedHeight, (totalVerticalElements + 1) * maxInlineFontSize * 1.8 * listMultiplier);
-                            } else {
-                                // Default height calculation with list multiplier
-                                const listMultiplier = listItems > 0 ? 1.4 : 1.0;
-                                calculatedHeight = Math.max(calculatedHeight, (totalVerticalElements + 1) * fontSize * 2.2 * listMultiplier);
-                            }
-                        } else {
-                            // No specific font sizes found
-                            const listMultiplier = listItems > 0 ? 1.4 : 1.0;
-                            calculatedHeight = Math.max(calculatedHeight, (totalVerticalElements + 1) * fontSize * 2.2 * listMultiplier);
-                        }
-                    } else {
-                        // No inline styles
-                        const listMultiplier = listItems > 0 ? 1.5 : 1.0;
-                        calculatedHeight = Math.max(calculatedHeight, (totalVerticalElements + 1) * fontSize * 2.5 * listMultiplier);
-                    }
-                    
-                    // Add extra height for content with lots of list items
-                    if (listItems > 5) {
-                        // For many list items, add even more extra space
-                        calculatedHeight += listItems * fontSize * 0.7;
-                    }
-                    
-                    // For content with both lists and paragraphs, add extra spacing for visual separation
-                    if (listItems > 0 && (blockElements - lists) > 0) {
-                        calculatedHeight += Math.min(lists, (blockElements - lists)) * fontSize * 1.2;
-                    }
-                    
-                    // Very wide elements need proportionally less height due to text wrapping
-                    if (geometry.width > 800) {
-                        // For wide elements, reduce height slightly as text has more room to flow horizontally
-                        const widthFactor = Math.min(1, 800 / geometry.width);
-                        calculatedHeight = Math.max(calculatedHeight * widthFactor, fontSize * 4);
-                        console.log(`Wide element (${geometry.width}px): Applied width factor ${widthFactor.toFixed(2)}, adjusted height: ${calculatedHeight}`);
-                    }
-                }
-                
-                // Update the geometry with the calculated height
-                geometry.height = calculatedHeight;
-                console.log(`Calculated appropriate height: ${calculatedHeight}`);
-            }
-            
-            // Log the final text to shape conversion details
-            console.log(`Converting text to shape:
-              Content: "${textContent.substring(0, 50)}${textContent.length > 50 ? '...' : ''}"
-              HTML Content: ${hasHtml ? 'Yes' : 'No'}
-              Font Size: ${textStyle.fontSize}
-              Final Dimensions: ${geometry.width}x${geometry.height}
-              Position: (${positionToUse.x}, ${positionToUse.y})
-            `);
-            
-            // If we've converted a text to shape, construct the body now
-            body = {
-                data: data,
-                style: textStyle,
-                position: normalizePositionValues(positionToUse),
-                geometry: normalizeGeometryValues(geometry),
-                parent: parent
-            };
-            
-            // Skip the later body construction
-            skipBodyConstruction = true;
-        }
-        
-        // Step 2: Normalize all values
-        const normalizedStyle = normalizeStyleValues(style);
-        const normalizedGeometry = normalizeGeometryValues(geometry);
-        const normalizedPosition = normalizePositionValues(args.position);
-        
-        // Step 3: Process data and type-specific adjustments
         // Map common shape names to Miro API shape names if needed
         if (type === 'shape' && data && data.shape) {
             const shapeMap: Record<string, string> = {
@@ -792,11 +453,11 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
                     const lowerHex = normalizedStyle.fillColor.toLowerCase();
                     if (hexToNameMap[lowerHex]) {
                         stickyNoteStyle.fillColor = hexToNameMap[lowerHex];
-                        console.log(`Mapped hex color ${normalizedStyle.fillColor} to Miro sticky note color name '${stickyNoteStyle.fillColor}'`);
+                        console.log(`Converted hex color ${lowerHex} to Miro sticky note color ${hexToNameMap[lowerHex]}`);
                     } else {
                         // If no exact match, use a default color
                         stickyNoteStyle.fillColor = 'yellow';
-                        console.log(`No mapping found for hex color ${normalizedStyle.fillColor}, defaulting to 'yellow'`);
+                        console.log(`Cannot map hex color ${lowerHex} to a Miro sticky note color. Using default 'yellow'.`);
                     }
                 } else if (typeof normalizedStyle.fillColor === 'string') {
                     // Check if it's a valid sticky note color name
@@ -842,19 +503,21 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
                     
                     if (mappedColor && validStickyNoteColors.includes(mappedColor)) {
                         stickyNoteStyle.fillColor = mappedColor;
-                        console.log(`Mapped color name '${colorName}' to valid Miro sticky note color '${mappedColor}'`);
                     } else if (validStickyNoteColors.includes(colorName)) {
                         stickyNoteStyle.fillColor = colorName;
-                        console.log(`Using valid Miro sticky note color: '${colorName}'`);
                     } else {
                         // Default to yellow if color is invalid
                         stickyNoteStyle.fillColor = 'yellow';
-                        console.log(`Invalid sticky note color name '${colorName}', defaulting to 'yellow'`);
+                        console.log(`Color name '${colorName}' is not a valid Miro sticky note color. Using default 'yellow'.`);
+                        console.log(`Valid sticky note colors are: ${validStickyNoteColors.join(', ')}`);
                     }
                 } else {
                     // Default to yellow for any other type
                     stickyNoteStyle.fillColor = 'yellow';
                 }
+            } else {
+                // If no fillColor is specified, default to yellow
+                stickyNoteStyle.fillColor = 'yellow';
             }
             
             // Copy other valid properties
@@ -866,15 +529,22 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
             
             // Use the sticky note specific style
             body.style = stickyNoteStyle;
-        } else {
-            // For other types, use the normalized style
-            if (normalizedStyle) {
-                body.style = normalizedStyle;
             }
         }
+
+        // Normalize geometry and position
+        const normalizedGeometry = normalizeGeometryValues(geometry);
+        const normalizedPosition = normalizePositionValues(args.position);
         
+        // Set default width for text if not provided
+        if (type === 'text' && (!normalizedGeometry || !normalizedGeometry.width)) {
+            body.geometry = { 
+                ...normalizedGeometry,
+                width: 105 // Default text width
+            };
+        }
         // Handle geometry constraints for sticky notes
-        if (type === 'sticky_note' && normalizedGeometry) {
+        else if (type === 'sticky_note' && normalizedGeometry) {
             // For sticky notes, only include one dimension (width or height)
             if (normalizedGeometry.width && normalizedGeometry.height) {
                 const { width } = normalizedGeometry;
@@ -884,21 +554,29 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
             }
         } else if (normalizedGeometry) {
             body.geometry = normalizedGeometry;
+        } else if (type === 'shape') {
+            // Set default geometry for shapes if not provided
+            body.geometry = {
+                width: 100,
+                height: 100
+            };
         }
         
-        // Add position if provided
+        // Add position if provided, otherwise use center of board
         if (normalizedPosition) {
             body.position = normalizedPosition;
+        } else {
+            body.position = {
+                x: 0,
+                y: 0,
+                origin: 'center',
+                relativeTo: 'canvas_center'
+            };
         }
         
         // Add data if provided
         if (data) {
-            if (type === 'shape') {
-                // For shapes, we need the shape type and content in the data object
-                body.data = data;
-            } else {
-                body.data = data;
-            }
+            body.data = data;
         }
         
         // Add parent if provided
@@ -906,22 +584,11 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
             body.parent = parent;
         }
 
-        // Step 4: Build the API request based on action
+        // Build the API request based on action
         switch (action) {
             case 'create':
                 url = `/v2/boards/${miroBoardId}/${type === 'sticky_note' ? 'sticky_notes' : `${type}s`}`;
                 method = 'post';
-                
-                // Only construct the body if we haven't already done so
-                if (!skipBodyConstruction) {
-                body = {
-                    ...(data && { data }),
-                        ...(normalizedStyle && { style: normalizedStyle }),
-                    ...(normalizedPosition && { position: normalizedPosition }),
-                        ...(normalizedGeometry && { geometry: normalizedGeometry }),
-                    ...(parent && { parent }),
-                };
-                }
                 break;
             case 'get_all':
                 url = `/v2/boards/${miroBoardId}/items`;
@@ -935,17 +602,6 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
             case 'update':
                 url = `/v2/boards/${miroBoardId}/${type === 'sticky_note' ? 'sticky_notes' : `${type}s`}/${item_id}`;
                 method = 'patch';
-                
-                // Only construct the body if we haven't already done so
-                if (!skipBodyConstruction) {
-                body = {
-                    ...(data && { data }),
-                        ...(normalizedStyle && { style: normalizedStyle }),
-                    ...(normalizedPosition && { position: normalizedPosition }),
-                        ...(normalizedGeometry && { geometry: normalizedGeometry }),
-                    ...(parent && { parent }),
-                };
-                }
                 break;
             case 'delete':
                 url = `/v2/boards/${miroBoardId}/${type === 'sticky_note' ? 'sticky_notes' : `${type}s`}/${item_id}`;
@@ -959,12 +615,9 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
             console.log(`With query params: ${JSON.stringify(queryParams)}`);
         }
 
-        // Step 5: Execute the API request
+        // Execute the API request
         try {
             let response;
-
-            console.log(`Executing content_item_operations (${action} ${type}): ${method.toUpperCase()} ${url}`);
-            console.log(`With body: ${JSON.stringify(body)}`);
 
             if (method === 'get') {
                 if (Object.keys(queryParams).length > 0) {
@@ -1005,16 +658,20 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
                 // Handle specific error cases
                 if (axiosError.response.status === 404 && parent) {
                     return formatApiError(error, `Error: The parent frame with ID ${parent.id} does not exist or is not accessible.`);
-                } else if (axiosError.response.status === 400 && normalizedStyle && type === 'sticky_note') {
+                } else if (axiosError.response.status === 400 && style && type === 'sticky_note') {
                     // More specific error for sticky note color issues
-                    return formatApiError(error, `Error: Invalid style properties for sticky note. Sticky notes only accept specific color names like 'yellow', 'blue', 'green', not hex values or unsupported color names.`);
+                    const validColors = ['gray', 'light_yellow', 'yellow', 'orange', 'light_green', 'green', 'dark_green', 'cyan', 'light_pink', 'pink', 'violet', 'red', 'light_blue', 'blue', 'dark_blue', 'black'];
+                    return formatApiError(error, `Error: Invalid style properties for sticky note. Sticky notes only accept specific named colors: ${validColors.join(', ')}. Hex color values are not supported for sticky notes.`);
                 } else if (axiosError.response.status === 400 && data?.content && containsHtml(data.content)) {
-                    // HTML formatting error
-                    return formatApiError(error, `Error: HTML formatting in content caused validation issues. Try using plain text with line breaks instead of HTML tags. HTML content has been converted but may need manual adjustment.`);
-                } else if (axiosError.response.status === 400 && normalizedStyle) {
+                    // Updated error message for HTML formatting issues
+                    return formatApiError(error, `Error: HTML formatting validation failed. Miro only supports these HTML tags: <p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>. Other HTML tags will be escaped as plain text.`);
+                } else if (axiosError.response.status === 400 && style && style.color) {
+                    // Specific error for color format issues
+                    return formatApiError(error, `Error: Invalid color format. Colors must be valid hex values (e.g., "#FF0000" for red) or named colors. Make sure to include the # prefix for hex colors.`);
+                } else if (axiosError.response.status === 400 && style) {
                     // Log more details about what might be wrong with style
-                    console.error(`Style properties that might be causing issues: ${JSON.stringify(normalizedStyle)}`);
-                    return formatApiError(error, `Error: Invalid style properties for ${type}. Check colors (must be hex format like #FF0000), border values, and other style settings.`);
+                    console.error(`Style properties that might be causing issues: ${JSON.stringify(style)}`);
+                    return formatApiError(error, `Error: Invalid style properties for ${type}. For colors, use hex format like "#FF0000" or valid color names. For text, use properties like color, fontFamily, fontSize, textAlign. For shapes, you can also use borderColor, borderWidth, fillColor, fillOpacity.`);
                 } else if (axiosError.response.status === 400 && parent) {
                     // Position outside parent boundaries
                     return formatApiError(error, `Error: Position is outside parent frame boundaries. When placing items in a frame, ensure coordinates are within the frame's dimensions or use 'parent_top_left' as the relativeTo reference.`);
