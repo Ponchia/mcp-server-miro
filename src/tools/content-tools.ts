@@ -5,71 +5,14 @@ import { normalizeStyleValues, normalizeGeometryValues, normalizePositionValues,
 import { ToolDefinition } from '../types/tool-types';
 import { miroBoardId } from '../config';
 
-// HTML processing functions
-/**
- * Detects if text contains HTML markup
- */
-const containsHtml = (text: string): boolean => {
-  const htmlRegex = /<([a-z][a-z0-9]*)\b[^>]*>(.*?)<\/\1>/i;
-  return htmlRegex.test(text);
-};
-
-/**
- * Converts HTML to rich text format that Miro can handle
- * Basic converter that handles common HTML tags
- */
-const convertHtmlToPlainText = (html: string): string => {
-  if (!containsHtml(html)) return html;
-  
-  let result = html;
-  
-  // Replace heading tags with text and newlines
-  result = result.replace(/<h1[^>]*>(.*?)<\/h1>/gi, '$1\n');
-  result = result.replace(/<h2[^>]*>(.*?)<\/h2>/gi, '$1\n');
-  result = result.replace(/<h3[^>]*>(.*?)<\/h3>/gi, '$1\n');
-  result = result.replace(/<h4[^>]*>(.*?)<\/h4>/gi, '$1\n');
-  result = result.replace(/<h5[^>]*>(.*?)<\/h5>/gi, '$1\n');
-  result = result.replace(/<h6[^>]*>(.*?)<\/h6>/gi, '$1\n');
-  
-  // Replace paragraph tags
-  result = result.replace(/<p[^>]*>(.*?)<\/p>/gi, '$1\n');
-  
-  // Replace list items
-  result = result.replace(/<li[^>]*>(.*?)<\/li>/gi, '• $1\n');
-  
-  // Replace br tags
-  result = result.replace(/<br\s*\/?>/gi, '\n');
-  
-  // Replace formatting tags
-  result = result.replace(/<b[^>]*>(.*?)<\/b>/gi, '$1');
-  result = result.replace(/<strong[^>]*>(.*?)<\/strong>/gi, '$1');
-  result = result.replace(/<i[^>]*>(.*?)<\/i>/gi, '$1');
-  result = result.replace(/<em[^>]*>(.*?)<\/em>/gi, '$1');
-  
-  // Remove other tags
-  result = result.replace(/<[^>]*>/g, '');
-  
-  // Decode HTML entities
-  result = result.replace(/&amp;/g, '&');
-  result = result.replace(/&lt;/g, '<');
-  result = result.replace(/&gt;/g, '>');
-  result = result.replace(/&quot;/g, '"');
-  result = result.replace(/&#39;/g, "'");
-  
-  // Clean up multiple newlines
-  result = result.replace(/\n\s*\n/g, '\n\n');
-  
-  return result;
-};
-
 // Schema definitions for content items
 const ContentItemSchema = z.object({
     action: z.enum(['create', 'get', 'get_all', 'update', 'delete']).describe('The action to perform.'),
     type: z.enum(['shape', 'text', 'sticky_note']).describe('The type of content item.'),
     item_id: z.string().optional().describe('Item ID (required for get, update, delete actions).'),
     data: z.object({
-        // Generic content properties - allow HTML content with looser validation
-        content: z.string().optional().describe('Text content. For rich text, use Markdown-like formatting (e.g., **bold**, *italic*) or simple newlines. HTML tags will be automatically converted to plain text.'),
+        // Generic content properties
+        content: z.string().optional().describe('Text content. For text styling in Miro, use plain text with newlines for paragraph breaks. Miro does not support markdown or rich text formatting, so use separate text elements with different styles for visual hierarchy.'),
         // Shape-specific properties
         shape: z.enum(['square', 'rectangle', 'round_rectangle', 'circle', 'triangle', 'rhombus', 
                      'diamond',
@@ -151,7 +94,7 @@ type ContentItemParams = z.infer<typeof ContentItemSchema>;
 // Implementation of content item operations tool
 export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
     name: 'mcp_miro_content_item_operations',
-    description: 'Creates and manages content on Miro boards including text, shapes with text, and sticky notes. Use this tool to: (1) create - add new text elements, shapes, or sticky notes with custom formatting, (2) get - retrieve a specific content item\'s details, (3) get_all - list all items of a specific type, (4) update - modify existing items\' content or appearance, (5) delete - remove items entirely. Text items in Miro are native elements that auto-size based on content and can be styled with fonts, colors, and alignment. Shapes include 25+ variations (rectangles, circles, arrows, etc.) and can contain text with styling options. Sticky notes only support specific named colors (like "yellow", "blue", "green"), not hex values. All items can be positioned precisely on the board or within frames. Simple text formatting with newlines provides the best results - HTML tags are converted to plain text.',
+    description: 'Creates and manages content on Miro boards including text, shapes with text, and sticky notes. Use this tool to: (1) create - add new text elements, shapes, or sticky notes with custom formatting, (2) get - retrieve a specific content item\'s details, (3) get_all - list all items of a specific type, (4) update - modify existing items\' content or appearance, (5) delete - remove items entirely. Text items in Miro work best with simple plain text and newlines for formatting. For different styles (headings, lists, etc.), create separate text elements with different font sizes and styles rather than using complex formatting. Shapes include 25+ variations (rectangles, circles, arrows, etc.) and can contain text. Sticky notes only support specific named colors (like "yellow", "blue", "green"), not hex values. All items can be positioned precisely on the board or within frames.',
     parameters: ContentItemSchema,
     execute: async (args) => {
         console.log(`Content Item Operation: ${JSON.stringify(args, null, 2)}`);
@@ -163,20 +106,9 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
         let queryParams: Record<string, string> = {};
         const body: Record<string, unknown> = {};
 
-        // Preprocess any HTML content to plain text for Miro compatibility
-        if (data?.content && containsHtml(data.content)) {
-            console.log(`HTML content detected. Converting to plain text for Miro compatibility.`);
-            const originalContent = data.content;
-            data = { ...data, content: convertHtmlToPlainText(data.content) };
-            console.log(`Converted HTML content:
-              Original: "${originalContent.substring(0, 50)}${originalContent.length > 50 ? '...' : ''}"
-              Converted: "${data.content?.substring(0, 50)}${data.content && data.content.length > 50 ? '...' : ''}"
-            `);
-        }
-
         // Process text elements properly
         if (type === 'text') {
-            console.log(`Handling native text element with proper Miro API formatting`);
+            console.log(`Handling native text element. Miro text elements work best with simple plain text and newlines.`);
             
             // Check if parent frame exists (if specified)
             if (parent && parent.id) {
@@ -336,159 +268,159 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
                 // Apply the normalized style
                 body.style = textStyle;
             }
-        } else {
+                            } else {
             // For non-text elements (shapes, sticky notes), use the original normalization
             const normalizedStyle = normalizeStyleValues(style);
             if (normalizedStyle) {
                 body.style = normalizedStyle;
             }
             
-            // Map common shape names to Miro API shape names if needed
-            if (type === 'shape' && data && data.shape) {
-                const shapeMap: Record<string, string> = {
-                    'diamond': 'rhombus',
-                    'oval': 'circle',
-                    'ellipse': 'circle',
-                    'pill': 'round_rectangle',
-                    'capsule': 'round_rectangle',
-                    'arrow': 'right_arrow',
-                    'callout': 'wedge_round_rectangle_callout',
-                    'cylinder': 'can'
-                };
-                
-                if (shapeMap[data.shape]) {
-                    data.shape = shapeMap[data.shape] as typeof data.shape;
+        // Map common shape names to Miro API shape names if needed
+        if (type === 'shape' && data && data.shape) {
+            const shapeMap: Record<string, string> = {
+                'diamond': 'rhombus',
+                'oval': 'circle',
+                'ellipse': 'circle',
+                'pill': 'round_rectangle',
+                'capsule': 'round_rectangle',
+                'arrow': 'right_arrow',
+                'callout': 'wedge_round_rectangle_callout',
+                'cylinder': 'can'
+            };
+            
+            if (shapeMap[data.shape]) {
+                data.shape = shapeMap[data.shape] as typeof data.shape;
+            }
+        }
+        
+        // Handle sticky note specific style requirements
+        if (type === 'sticky_note' && normalizedStyle) {
+            // Only allow predefined color names for sticky notes
+            const validStickyNoteColors = [
+                'gray', 'light_yellow', 'yellow', 'orange', 'light_green', 'green', 
+                'dark_green', 'cyan', 'light_pink', 'pink', 'violet', 'red', 
+                'light_blue', 'blue', 'dark_blue', 'black'
+            ];
+            
+            // Create a new processed style object
+            const stickyNoteStyle: Record<string, unknown> = {};
+            
+            // Only copy allowed properties for sticky notes
+            if (normalizedStyle.fillColor) {
+                // Check if fillColor is a hex value and needs conversion
+                if (typeof normalizedStyle.fillColor === 'string' && 
+                    normalizedStyle.fillColor.startsWith('#')) {
+                    // Map hex colors to nearest predefined color
+                    const hexToNameMap: Record<string, string> = {
+                        '#ff0000': 'red',
+                        '#ff3333': 'red',
+                        '#ff6666': 'red',
+                        '#ff9999': 'light_pink',
+                        '#ffcccc': 'light_pink',
+                        '#ffaaaa': 'light_pink',
+                        '#00ff00': 'green',
+                        '#33ff33': 'light_green',
+                        '#66ff66': 'light_green',
+                        '#99ff99': 'light_green',
+                        '#0000ff': 'blue',
+                        '#3333ff': 'blue',
+                        '#6666ff': 'light_blue',
+                        '#9999ff': 'light_blue',
+                        '#ffff00': 'yellow',
+                        '#ffff33': 'yellow',
+                        '#ffff66': 'light_yellow',
+                        '#ffff99': 'light_yellow',
+                        '#ff9900': 'orange',
+                        '#ff9933': 'orange',
+                        '#ff9966': 'orange',
+                        '#cc33ff': 'violet',
+                        '#9933ff': 'violet',
+                        '#ffffff': 'gray',
+                        '#f8f8f8': 'gray',
+                        '#eeeeee': 'gray',
+                        '#dddddd': 'gray',
+                        '#cccccc': 'gray',
+                        '#000000': 'black',
+                        '#333333': 'black',
+                        '#666666': 'dark_blue',
+                        '#888888': 'gray',
+                        '#0052CC': 'blue',
+                        '#00CCCC': 'cyan'
+                    };
+                    
+                    // Try to map to a valid color name
+                    const lowerHex = normalizedStyle.fillColor.toLowerCase();
+                    if (hexToNameMap[lowerHex]) {
+                        stickyNoteStyle.fillColor = hexToNameMap[lowerHex];
+                    } else {
+                        // If no exact match, use a default color
+                        stickyNoteStyle.fillColor = 'yellow';
+                    }
+                } else if (typeof normalizedStyle.fillColor === 'string') {
+                    // Check if it's a valid sticky note color name
+                    const colorName = normalizedStyle.fillColor.toLowerCase();
+                    
+                    // Handle common color name conversions
+                    const colorNameMap: Record<string, string> = {
+                        'pink': 'pink',
+                        'lightpink': 'light_pink',
+                        'light-pink': 'light_pink',
+                        'light_pink': 'light_pink',
+                        'red': 'red',
+                        'green': 'green',
+                        'lightgreen': 'light_green',
+                        'light-green': 'light_green',
+                        'light_green': 'light_green',
+                        'darkgreen': 'dark_green',
+                        'dark-green': 'dark_green',
+                        'dark_green': 'dark_green',
+                        'blue': 'blue',
+                        'lightblue': 'light_blue',
+                        'light-blue': 'light_blue',
+                        'light_blue': 'light_blue',
+                        'darkblue': 'dark_blue',
+                        'dark-blue': 'dark_blue',
+                        'dark_blue': 'dark_blue',
+                        'yellow': 'yellow',
+                        'lightyellow': 'light_yellow',
+                        'light-yellow': 'light_yellow',
+                        'light_yellow': 'light_yellow',
+                        'orange': 'orange',
+                        'violet': 'violet',
+                        'purple': 'violet',
+                        'cyan': 'cyan',
+                        'aqua': 'cyan',
+                        'teal': 'cyan',
+                        'gray': 'gray',
+                        'grey': 'gray',
+                        'black': 'black'
+                    };
+                    
+                    const mappedColor = colorNameMap[colorName];
+                    
+                    if (mappedColor && validStickyNoteColors.includes(mappedColor)) {
+                        stickyNoteStyle.fillColor = mappedColor;
+                    } else if (validStickyNoteColors.includes(colorName)) {
+                        stickyNoteStyle.fillColor = colorName;
+                    } else {
+                        // Default to yellow if color is invalid
+                        stickyNoteStyle.fillColor = 'yellow';
+                    }
+                } else {
+                    // Default to yellow for any other type
+                    stickyNoteStyle.fillColor = 'yellow';
                 }
             }
             
-            // Handle sticky note specific style requirements
-            if (type === 'sticky_note' && normalizedStyle) {
-                // Only allow predefined color names for sticky notes
-                const validStickyNoteColors = [
-                    'gray', 'light_yellow', 'yellow', 'orange', 'light_green', 'green', 
-                    'dark_green', 'cyan', 'light_pink', 'pink', 'violet', 'red', 
-                    'light_blue', 'blue', 'dark_blue', 'black'
-                ];
-                
-                // Create a new processed style object
-                const stickyNoteStyle: Record<string, unknown> = {};
-                
-                // Only copy allowed properties for sticky notes
-                if (normalizedStyle.fillColor) {
-                    // Check if fillColor is a hex value and needs conversion
-                    if (typeof normalizedStyle.fillColor === 'string' && 
-                        normalizedStyle.fillColor.startsWith('#')) {
-                        // Map hex colors to nearest predefined color
-                        const hexToNameMap: Record<string, string> = {
-                            '#ff0000': 'red',
-                            '#ff3333': 'red',
-                            '#ff6666': 'red',
-                            '#ff9999': 'light_pink',
-                            '#ffcccc': 'light_pink',
-                            '#ffaaaa': 'light_pink',
-                            '#00ff00': 'green',
-                            '#33ff33': 'light_green',
-                            '#66ff66': 'light_green',
-                            '#99ff99': 'light_green',
-                            '#0000ff': 'blue',
-                            '#3333ff': 'blue',
-                            '#6666ff': 'light_blue',
-                            '#9999ff': 'light_blue',
-                            '#ffff00': 'yellow',
-                            '#ffff33': 'yellow',
-                            '#ffff66': 'light_yellow',
-                            '#ffff99': 'light_yellow',
-                            '#ff9900': 'orange',
-                            '#ff9933': 'orange',
-                            '#ff9966': 'orange',
-                            '#cc33ff': 'violet',
-                            '#9933ff': 'violet',
-                            '#ffffff': 'gray',
-                            '#f8f8f8': 'gray',
-                            '#eeeeee': 'gray',
-                            '#dddddd': 'gray',
-                            '#cccccc': 'gray',
-                            '#000000': 'black',
-                            '#333333': 'black',
-                            '#666666': 'dark_blue',
-                            '#888888': 'gray',
-                            '#0052CC': 'blue',
-                            '#00CCCC': 'cyan'
-                        };
-                        
-                        // Try to map to a valid color name
-                        const lowerHex = normalizedStyle.fillColor.toLowerCase();
-                        if (hexToNameMap[lowerHex]) {
-                            stickyNoteStyle.fillColor = hexToNameMap[lowerHex];
-                        } else {
-                            // If no exact match, use a default color
-                            stickyNoteStyle.fillColor = 'yellow';
-                        }
-                    } else if (typeof normalizedStyle.fillColor === 'string') {
-                        // Check if it's a valid sticky note color name
-                        const colorName = normalizedStyle.fillColor.toLowerCase();
-                        
-                        // Handle common color name conversions
-                        const colorNameMap: Record<string, string> = {
-                            'pink': 'pink',
-                            'lightpink': 'light_pink',
-                            'light-pink': 'light_pink',
-                            'light_pink': 'light_pink',
-                            'red': 'red',
-                            'green': 'green',
-                            'lightgreen': 'light_green',
-                            'light-green': 'light_green',
-                            'light_green': 'light_green',
-                            'darkgreen': 'dark_green',
-                            'dark-green': 'dark_green',
-                            'dark_green': 'dark_green',
-                            'blue': 'blue',
-                            'lightblue': 'light_blue',
-                            'light-blue': 'light_blue',
-                            'light_blue': 'light_blue',
-                            'darkblue': 'dark_blue',
-                            'dark-blue': 'dark_blue',
-                            'dark_blue': 'dark_blue',
-                            'yellow': 'yellow',
-                            'lightyellow': 'light_yellow',
-                            'light-yellow': 'light_yellow',
-                            'light_yellow': 'light_yellow',
-                            'orange': 'orange',
-                            'violet': 'violet',
-                            'purple': 'violet',
-                            'cyan': 'cyan',
-                            'aqua': 'cyan',
-                            'teal': 'cyan',
-                            'gray': 'gray',
-                            'grey': 'gray',
-                            'black': 'black'
-                        };
-                        
-                        const mappedColor = colorNameMap[colorName];
-                        
-                        if (mappedColor && validStickyNoteColors.includes(mappedColor)) {
-                            stickyNoteStyle.fillColor = mappedColor;
-                        } else if (validStickyNoteColors.includes(colorName)) {
-                            stickyNoteStyle.fillColor = colorName;
-                        } else {
-                            // Default to yellow if color is invalid
-                            stickyNoteStyle.fillColor = 'yellow';
-                        }
-                    } else {
-                        // Default to yellow for any other type
-                        stickyNoteStyle.fillColor = 'yellow';
-                    }
+            // Copy other valid properties
+            ['fontFamily', 'fontSize', 'textAlign', 'content'].forEach(prop => {
+                if (normalizedStyle && prop in normalizedStyle) {
+                    stickyNoteStyle[prop] = normalizedStyle[prop];
                 }
-                
-                // Copy other valid properties
-                ['fontFamily', 'fontSize', 'textAlign', 'content'].forEach(prop => {
-                    if (normalizedStyle && prop in normalizedStyle) {
-                        stickyNoteStyle[prop] = normalizedStyle[prop];
-                    }
-                });
-                
-                // Use the sticky note specific style
-                body.style = stickyNoteStyle;
+            });
+            
+            // Use the sticky note specific style
+            body.style = stickyNoteStyle;
             }
         }
 
@@ -516,7 +448,7 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
         
         // Add data if provided
         if (data) {
-            body.data = data;
+                body.data = data;
         }
         
         // Add parent if provided
@@ -550,7 +482,7 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
         }
 
         console.log(`Executing content_item_operations (${action} ${type}): ${method.toUpperCase()} ${url}`);
-        console.log(`With body: ${JSON.stringify(body)}`);
+            console.log(`With body: ${JSON.stringify(body)}`);
         if (Object.keys(queryParams).length > 0) {
             console.log(`With query params: ${JSON.stringify(queryParams)}`);
         }
@@ -601,9 +533,9 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
                 } else if (axiosError.response.status === 400 && style && type === 'sticky_note') {
                     // More specific error for sticky note color issues
                     return formatApiError(error, `Error: Invalid style properties for sticky note. Sticky notes only accept specific color names like 'yellow', 'blue', 'green', not hex values or unsupported color names.`);
-                } else if (axiosError.response.status === 400 && data?.content && containsHtml(data.content)) {
-                    // HTML formatting error
-                    return formatApiError(error, `Error: HTML formatting in content caused validation issues. Try using plain text with line breaks instead of HTML tags. HTML content has been converted but may need manual adjustment.`);
+                } else if (axiosError.response.status === 400 && data?.content) {
+                    // Updated error message about text formatting
+                    return formatApiError(error, `Error: Text formatting issues detected. Miro text elements support only plain text with newlines. For different text styles, create multiple text elements with different styling.`);
                 } else if (axiosError.response.status === 400 && style) {
                     // Log more details about what might be wrong with style
                     console.error(`Style properties that might be causing issues: ${JSON.stringify(style)}`);
