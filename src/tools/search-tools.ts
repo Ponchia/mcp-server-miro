@@ -293,7 +293,7 @@ const isInArea = (item: MiroItem, area: { x: number; y: number; width: number; h
 
 // Search Tool implementation
 export const searchTool: ToolDefinition<SearchParams> = {
-    name: 'mcp_miro_search',
+    name: 'mcp_miro_unified_search',
     description: `Powerful multi-criteria search tool designed specifically for AI agents to efficiently find Miro board elements. This single tool replaces the need for multiple search operations and handles complex search tasks with a single call.
 
 KEY CAPABILITIES:
