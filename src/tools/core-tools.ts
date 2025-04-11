@@ -5,6 +5,7 @@ import { formatApiResponse, formatApiError } from '../utils/api-utils';
 import { normalizePositionValues, validateChildPosition } from '../utils/data-utils';
 import { ToolDefinition } from '../types/tool-types';
 import { PositionSchema, MCP_POSITIONING_GUIDE } from '../schemas/position-schema';
+import { SIMPLIFIED_POSITIONING_GUIDE } from './content-tools';
 
 // Use the centralized position schema
 export const PositionChangeSchema = PositionSchema;
@@ -36,7 +37,7 @@ export const bulkItemCreationTool: ToolDefinition<BulkItemCreationParams> = {
     name: 'mcp_miro_bulk_item_creation',
     description: `Creates multiple items on a Miro board simultaneously in a single API call (up to 20 items maximum). This is ideal for efficiently building complex diagrams, charts, or layouts with many related elements. All item types are supported including shapes, sticky notes, text, images, and more. Each item in the batch can have its own type, data properties, styling, position, and dimensions. Items can be positioned relative to the canvas center or within parent frames. This tool uses atomic operations - if any single item fails validation, the entire batch will fail and no items will be created, ensuring visual consistency. Use this when you need to create multiple related items at once, such as flowchart nodes, dashboard elements, or diagram components that form a cohesive visual.
 
-${MCP_POSITIONING_GUIDE}`,
+${SIMPLIFIED_POSITIONING_GUIDE}`,
     parameters: BulkItemsSchema,
     execute: async (args) => {
         const { items } = args;
@@ -55,14 +56,48 @@ ${MCP_POSITIONING_GUIDE}`,
                 
                 // Check if parent present and position needs validation
                 if (normalizedItem.parent?.id && normalizedItem.position) {
+                    // Helper function to ensure valid parent position (same as in content-tools.ts)
+                    const ensureValidParentPosition = (position: Record<string, unknown>) => {
+                        // If using parent_center, ensure origin is center (required)
+                        if (position.__refSystem === 'parent_center' || position.relativeTo === 'parent_center') {
+                            if (position.origin !== 'center') {
+                                console.log('Auto-correcting: Setting origin to "center" for parent_center reference (required)');
+                                position.origin = 'center';
+                            }
+                        }
+                        
+                        // If using parent_top_left, ensure coordinates are positive
+                        if (position.__refSystem === 'parent_top_left' || position.relativeTo === 'parent_top_left') {
+                            const x = position.x as number;
+                            const y = position.y as number;
+                            
+                            if (x < 0 || y < 0) {
+                                console.log(`Auto-correcting: Converting negative coordinates (${x},${y}) to positive for parent_top_left`);
+                                position.x = Math.max(0, x);
+                                position.y = Math.max(0, y);
+                            }
+                        }
+                        
+                        return position;
+                    };
+
+                    // Apply the enhanced position validation
+                    const position = normalizedItem.position as Record<string, unknown>;
+                    const validPosition = ensureValidParentPosition(position);
+                    normalizedItem.position = validPosition as typeof normalizedItem.position;
+                    
                     // Get parent ID to retrieve its geometry later if needed
                     const parentId = normalizedItem.parent.id;
-                    console.log(`Item with parent ${parentId} will use position relative to parent`);
+                    console.log(`Item with parent ${parentId} using enhanced positioning with reference system: ${position.__refSystem || 'unknown'}`);
                     
-                    // Parent-relative positioning is complex with bulk creation
-                    // We'll need to convert coordinates to parent_top_left format
-                    console.log(`Bulk creation: Coordinates for items in parent frames should use parent_top_left format`);
-                    console.log(`For advanced positioning, use individual item creation instead of bulk creation`);
+                    // Provide clearer guidance based on the reference system
+                    if (position.__refSystem === 'parent_center' || position.relativeTo === 'parent_center') {
+                        console.log(`Using parent_center positioning: Make sure origin is set to "center"`);
+                    } else if (position.__refSystem === 'parent_top_left' || position.relativeTo === 'parent_top_left') {
+                        console.log(`Using parent_top_left positioning: Using positive coordinates relative to frame's top-left corner`);
+                    } else {
+                        console.log(`Bulk creation: For complex frame positioning, single-item creation offers more precision`);
+                    }
                 }
                 
                 // Clean up position data - ensure only API-compatible properties remain
@@ -105,6 +140,27 @@ ${MCP_POSITIONING_GUIDE}`,
             console.log(`API Call Successful: ${response.status}`);
             return formatApiResponse(response.data);
         } catch (error) {
+            // Enhanced error handling for parent positioning issues
+            const axiosError = error as {
+                response?: {
+                    status: number;
+                    data?: {
+                        message?: string;
+                    };
+                };
+            };
+            if (axiosError?.response?.status === 400 && axiosError?.response?.data?.message?.includes('parent')) {
+                return formatApiError(error, `Error creating bulk items with parent frames. Possible causes:
+1. Parent frame ID might be invalid
+2. Position is outside parent frame boundaries
+3. Missing origin="center" for parent_center reference
+
+POSITIONING RECOMMENDATIONS:
+- For items in frames, use the simplified positioning guide:
+  a) CENTER: {"x": 0, "y": 0, "relativeTo": "parent_center", "origin": "center"}
+  b) TOP-LEFT: {"x": 10, "y": 10, "relativeTo": "parent_top_left"}
+- For complex positioning needs, use individual item creation instead of bulk creation`);
+            }
             return formatApiError(error);
         }
     },

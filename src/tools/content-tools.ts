@@ -430,36 +430,6 @@ FRAMES AND ORGANIZATION:`,
     execute: async (args) => {
         console.log(`Content Item Operation: ${JSON.stringify(args, null, 2)}`);
         
-        // Comprehensive guide for LLMs using this tool
-        console.log(`
-=== LLM GUIDANCE FOR MIRO CONTENT OPERATIONS ===
-
-1. COLOR FORMATS:
-   - Use standard 6-digit hex with # prefix: "#FF0000" (red), "#00FF00" (green)
-   - Named colors also work: "red", "blue", "green", etc.
-   - Common diagram/flowchart colors are supported: "#D5E8D4" (light green), "#82B366" (border green)
-   - For sticky notes, only use named colors like "yellow", "green", "blue"
-
-2. POSITIONING ITEMS:
-   - When using "parent" (to place inside a frame), follow these rules:
-     * Always use "relativeTo": "parent_top_left" in the position object
-     * Use POSITIVE coordinates (x ≥ 0, y ≥ 0)
-     * Example: {"x": 10, "y": 10, "relativeTo": "parent_top_left"}
-
-3. FRAME USAGE:
-   - Frames use "title" parameter, not "content" - no HTML in frame titles
-   - Content with HTML should be in items inside the frame
-   - Create frames with mcp_miro_frame_operations, not content_item_operations
-   - Example frame creation: {"action":"create", "data":{"title":"My Frame"}}
-
-4. COMMON FIXES:
-   - If color error: Double-check fillColor, borderColor, color properties
-   - If position error: Ensure positive coordinates with relativeTo: "parent_top_left"
-   - If parent error: Verify the parent frame ID exists
-
-=== END GUIDANCE ===
-`);
-        
         // Special guide for LLMs about color handling
         if (args.style) {
             // Check if we need to warn about color format
