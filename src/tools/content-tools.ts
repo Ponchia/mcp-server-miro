@@ -254,14 +254,7 @@ const ContentItemSchema = z.object({
     }).optional().describe('Content data based on type.'),
     style: z.object({
         // Generic style properties
-        fillColor: z.union([
-            z.string().regex(/^#[0-9a-fA-F]{6}$/),
-            z.string().regex(/^#[0-9a-fA-F]{3}$/),
-            z.string().regex(/^[0-9a-fA-F]{6}$/),  // Allow hex without # prefix
-            z.enum(['gray', 'light_yellow', 'yellow', 'orange', 'light_green', 'green', 
-                  'dark_green', 'cyan', 'light_pink', 'pink', 'violet', 'red', 'light_blue', 
-                  'blue', 'dark_blue', 'black', 'white', 'transparent'])
-        ]).optional().describe('Background color. Examples: "#FF0000" (red), "#00FF00" (green), "blue", "transparent" (default for text).'),
+        fillColor: z.string().optional().describe('Background color. Examples: "#FF0000" (red), "#00FF00" (green), "blue", "transparent" (default for text).'),
         fillOpacity: z.number().min(0).max(1).optional().describe('Background opacity from 0.0 (transparent) to 1.0 (solid). Example: 0.5 for semi-transparent.'),
         color: z.string().optional().describe('Text color. Examples: "#000000" (black), "#FF0000" (red), "blue". Default: "#1a1a1a" (dark gray).'),
         fontFamily: z.enum(['arial', 'abril_fatface', 'bangers', 'eb_garamond', 'georgia', 'graduate', 
@@ -274,7 +267,7 @@ const ContentItemSchema = z.object({
         textAlign: z.enum(['left', 'right', 'center']).optional().describe('Horizontal text alignment. Default: "left".'),
         textAlignVertical: z.enum(['top', 'middle', 'bottom']).optional().describe('Vertical text alignment. Default: "middle".'),
         // Shape-specific style properties
-        borderColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().describe('Border color for shapes. Must be a hex color. Example: "#000000" for black border.'),
+        borderColor: z.string().optional().describe('Border color for shapes. Must be a hex color. Example: "#000000" for black border.'),
         borderOpacity: z.union([
             z.string().refine(val => {
                 const num = parseFloat(val);
@@ -344,8 +337,27 @@ TEXT HTML FORMATTING:
   * "<ul><li>First item</li><li>Second item</li></ul>" → Bulleted list with two items
   * "<p>Text with <span style='color:red'>colored span</span></p>" → Note: inline styles in spans may not be fully supported
 
+COLOR FORMAT SUPPORT:
+- Most standard web color formats are accepted including:
+  * Hex with # prefix: "#FF0000" (red), "#000" (black)
+  * Hex without # prefix: "FF0000" (red), "000" (black)
+  * RGB function: "rgb(255, 0, 0)" (red)
+  * Named colors: "red", "blue", "green", "transparent", etc.
+- Item type specific color handling:
+  * Text & Shapes: Accept all color formats and convert as needed
+  * Sticky notes: Color will be mapped to the closest valid Miro sticky note color ("yellow", "blue", "green", etc.)
+- When in doubt, use standard 6-digit hex codes with # prefix for best compatibility
+
+POSITIONING ITEMS:
+- Default position: Center of the board if not specified (x: 0, y: 0)
+- Absolute coordinates: Use x, y values in dp (design pixels)
+- Parent frames: 
+  * When placing items inside a frame (using parent.id), position is relative to the frame's size
+  * For items in frames, use relativeTo: "parent_top_left" to position relative to frame's top-left corner
+  * Position values must be positive and within the frame's dimensions
+  * Example: {"x": 10, "y": 10, "relativeTo": "parent_top_left"} positions 10px from frame's top-left corner
+
 TEXT STYLE LIMITATIONS:
-- Color: Use hex values (#RRGGBB) - Examples: "#FF0000" (red), "#000000" (black)
 - Font families: Limited to Miro's supported fonts (arial, roboto, times_new_roman, etc.)
 - Font sizes: Numeric values (14 = default, range from 0.001 to unlimited)
 - Text alignment: "left" (default), "center", or "right"
@@ -357,15 +369,61 @@ STYLING EXAMPLES:
 - Shape: {fillColor: "#E6F9FF", fillOpacity: 0.5, borderColor: "#0000FF", borderWidth: 2}
 - Sticky note: {fillColor: "yellow"} (only accepts named colors, not hex values)
 
-POSITIONING: 
-- All items can be precisely positioned with x/y coordinates
-- Default position is the center of the board if not specified
-- Can be placed inside frames using the parent parameter
-
-For all items, omitted parameters will use reasonable defaults. For sticky notes, only specific named colors are supported, not hex values.`,
+For all items, omitted parameters will use reasonable defaults.`,
     parameters: ContentItemSchema,
     execute: async (args) => {
         console.log(`Content Item Operation: ${JSON.stringify(args, null, 2)}`);
+        
+        // Comprehensive guide for LLMs using this tool
+        console.log(`
+=== LLM GUIDANCE FOR MIRO CONTENT OPERATIONS ===
+
+1. COLOR FORMATS:
+   - Use standard 6-digit hex with # prefix: "#FF0000" (red), "#00FF00" (green)
+   - Named colors also work: "red", "blue", "green", etc.
+   - Common diagram/flowchart colors are supported: "#D5E8D4" (light green), "#82B366" (border green)
+   - For sticky notes, only use named colors like "yellow", "green", "blue"
+
+2. POSITIONING ITEMS:
+   - When using "parent" (to place inside a frame), follow these rules:
+     * Always use "relativeTo": "parent_top_left" in the position object
+     * Use POSITIVE coordinates (x ≥ 0, y ≥ 0)
+     * Example: {"x": 10, "y": 10, "relativeTo": "parent_top_left"}
+
+3. STYLE PROPERTIES:
+   - Text: {color, fontFamily, fontSize, textAlign}
+   - Shapes: {fillColor, borderColor, borderWidth, borderStyle, textAlign}
+   - Sticky Notes: {fillColor} (only named colors)
+
+4. COMMON FIXES:
+   - If color error: Double-check fillColor, borderColor, color properties
+   - If position error: Ensure positive coordinates with relativeTo: "parent_top_left"
+   - If parent error: Verify the parent frame ID exists
+
+=== END GUIDANCE ===
+`);
+        
+        // Special guide for LLMs about color handling
+        if (args.style) {
+            // Check if we need to warn about color format
+            const hasColorProps = args.style.color || args.style.fillColor || args.style.borderColor;
+            if (hasColorProps) {
+                const itemType = args.type || 'unknown';
+                console.log(`
+Color format guide for LLMs - Item type: ${itemType}
+- For text and shapes: All web color formats are supported and will be converted to hex
+- For sticky notes: Colors will be mapped to the closest valid Miro sticky note color
+- Preferred formats: "#RRGGBB" hex with # prefix or standard color names like "blue"
+- The tool will attempt to convert other formats but for best results use standard formats
+
+Position guide for items in frames:
+- When placing items in a frame (using parent.id), use positive coordinates
+- Use "relativeTo": "parent_top_left" to position relative to frame's top-left corner
+- Example position: {"x": 10, "y": 10, "relativeTo": "parent_top_left"}
+`);
+            }
+        }
+        
         const { action, item_id, type, geometry, parent } = args;
         let { data } = args;
         const style = args.style;
@@ -489,15 +547,22 @@ For all items, omitted parameters will use reasonable defaults. For sticky notes
                 
                 if (typeof colorValue === 'string') {
                     // Convert uppercase hex codes to lowercase for consistency
-                    const lowerColor = colorValue.toLowerCase();
+                    const lowerColor = colorValue.toLowerCase().trim();
                     
-                    // If it's already a valid hex color, use it
+                    // If it's already a valid hex color with # prefix, use it
                     if (lowerColor.match(/^#[0-9a-f]{6}$/)) {
                         return lowerColor;
                     }
                     
-                    // Handle common color names
+                    // Handle 8-digit hex (with alpha) by removing the alpha component
+                    if (lowerColor.match(/^#[0-9a-f]{8}$/)) {
+                        // Extract just the RGB part (first 7 chars, including #)
+                        return lowerColor.substring(0, 7);
+                    }
+                    
+                    // Add some common web colors that might be used in diagrams and charts
                     const colorMap: Record<string, string> = {
+                        // Basic colors
                         'black': '#000000',
                         'white': '#ffffff',
                         'red': '#ff0000',
@@ -506,10 +571,165 @@ For all items, omitted parameters will use reasonable defaults. For sticky notes
                         'yellow': '#ffff00',
                         'cyan': '#00ffff',
                         'magenta': '#ff00ff',
+                        'purple': '#800080',
+                        'violet': '#8a2be2',
+                        'pink': '#ffc0cb',
+                        'brown': '#a52a2a',
+                        'orange': '#ffa500',
                         'gray': '#808080',
-                        'grey': '#808080'
+                        'grey': '#808080',
+                        'lightgray': '#d3d3d3',
+                        'lightgrey': '#d3d3d3',
+                        'darkgray': '#a9a9a9',
+                        'darkgrey': '#a9a9a9',
+                        
+                        // Common extended colors
+                        'lime': '#00ff00',
+                        'navy': '#000080',
+                        'aqua': '#00ffff',
+                        'teal': '#008080',
+                        'olive': '#808000',
+                        'maroon': '#800000',
+                        'silver': '#c0c0c0',
+                        
+                        // Common web/diagram colors
+                        'aliceblue': '#f0f8ff',
+                        'antiquewhite': '#faebd7',
+                        'aquamarine': '#7fffd4',
+                        'azure': '#f0ffff',
+                        'beige': '#f5f5dc',
+                        'bisque': '#ffe4c4',
+                        'blanchedalmond': '#ffebcd',
+                        'blueviolet': '#8a2be2',
+                        'burlywood': '#deb887',
+                        'cadetblue': '#5f9ea0',
+                        'chartreuse': '#7fff00',
+                        'chocolate': '#d2691e',
+                        'coral': '#ff7f50',
+                        'cornflowerblue': '#6495ed',
+                        'cornsilk': '#fff8dc',
+                        'crimson': '#dc143c',
+                        'darkblue': '#00008b',
+                        'darkcyan': '#008b8b',
+                        'darkgoldenrod': '#b8860b',
+                        'darkgreen': '#006400',
+                        'darkkhaki': '#bdb76b',
+                        'darkmagenta': '#8b008b',
+                        'darkolivegreen': '#556b2f',
+                        'darkorange': '#ff8c00',
+                        'darkorchid': '#9932cc',
+                        'darkred': '#8b0000',
+                        'darksalmon': '#e9967a',
+                        'darkseagreen': '#8fbc8f',
+                        'darkslateblue': '#483d8b',
+                        'darkslategray': '#2f4f4f',
+                        'darkslategrey': '#2f4f4f',
+                        'darkturquoise': '#00ced1',
+                        'darkviolet': '#9400d3',
+                        'deeppink': '#ff1493',
+                        'deepskyblue': '#00bfff',
+                        'dimgray': '#696969',
+                        'dimgrey': '#696969',
+                        'dodgerblue': '#1e90ff',
+                        'firebrick': '#b22222',
+                        'floralwhite': '#fffaf0',
+                        'forestgreen': '#228b22',
+                        'gainsboro': '#dcdcdc',
+                        'ghostwhite': '#f8f8ff',
+                        'gold': '#ffd700',
+                        'goldenrod': '#daa520',
+                        'greenyellow': '#adff2f',
+                        'honeydew': '#f0fff0',
+                        'hotpink': '#ff69b4',
+                        'indianred': '#cd5c5c',
+                        'indigo': '#4b0082',
+                        'ivory': '#fffff0',
+                        'khaki': '#f0e68c',
+                        'lavender': '#e6e6fa',
+                        'lavenderblush': '#fff0f5',
+                        'lawngreen': '#7cfc00',
+                        'lemonchiffon': '#fffacd',
+                        'lightblue': '#add8e6',
+                        'lightcoral': '#f08080',
+                        'lightcyan': '#e0ffff',
+                        'lightgoldenrodyellow': '#fafad2',
+                        'lightgreen': '#90ee90',
+                        'lightpink': '#ffb6c1',
+                        'lightsalmon': '#ffa07a',
+                        'lightseagreen': '#20b2aa',
+                        'lightskyblue': '#87cefa',
+                        'lightslategray': '#778899',
+                        'lightslategrey': '#778899',
+                        'lightsteelblue': '#b0c4de',
+                        'lightyellow': '#ffffe0',
+                        'limegreen': '#32cd32',
+                        'linen': '#faf0e6',
+                        'mediumaquamarine': '#66cdaa',
+                        'mediumblue': '#0000cd',
+                        'mediumorchid': '#ba55d3',
+                        'mediumpurple': '#9370db',
+                        'mediumseagreen': '#3cb371',
+                        'mediumslateblue': '#7b68ee',
+                        'mediumspringgreen': '#00fa9a',
+                        'mediumturquoise': '#48d1cc',
+                        'mediumvioletred': '#c71585',
+                        'midnightblue': '#191970',
+                        'mintcream': '#f5fffa',
+                        'mistyrose': '#ffe4e1',
+                        'moccasin': '#ffe4b5',
+                        'navajowhite': '#ffdead',
+                        'oldlace': '#fdf5e6',
+                        'olivedrab': '#6b8e23',
+                        'orangered': '#ff4500',
+                        'orchid': '#da70d6',
+                        'palegoldenrod': '#eee8aa',
+                        'palegreen': '#98fb98',
+                        'paleturquoise': '#afeeee',
+                        'palevioletred': '#db7093',
+                        'papayawhip': '#ffefd5',
+                        'peachpuff': '#ffdab9',
+                        'peru': '#cd853f',
+                        'plum': '#dda0dd',
+                        'powderblue': '#b0e0e6',
+                        'rosybrown': '#bc8f8f',
+                        'royalblue': '#4169e1',
+                        'saddlebrown': '#8b4513',
+                        'salmon': '#fa8072',
+                        'sandybrown': '#f4a460',
+                        'seagreen': '#2e8b57',
+                        'seashell': '#fff5ee',
+                        'sienna': '#a0522d',
+                        'skyblue': '#87ceeb',
+                        'slateblue': '#6a5acd',
+                        'slategray': '#708090',
+                        'slategrey': '#708090',
+                        'snow': '#fffafa',
+                        'springgreen': '#00ff7f',
+                        'steelblue': '#4682b4',
+                        'tan': '#d2b48c',
+                        'thistle': '#d8bfd8',
+                        'tomato': '#ff6347',
+                        'turquoise': '#40e0d0',
+                        'wheat': '#f5deb3',
+                        'whitesmoke': '#f5f5f5',
+                        'yellowgreen': '#9acd32',
+                        
+                        // Common Microsoft/Office colors
+                        'd5e8d4': '#d5e8d4', // Light green (often used in diagrams)
+                        '82b366': '#82b366', // Darker green (often used for borders)
+                        'dae8fc': '#dae8fc', // Light blue
+                        '6c8ebf': '#6c8ebf', // Darker blue
+                        'f8cecc': '#f8cecc', // Light red/pink
+                        'b85450': '#b85450', // Darker red
+                        'fff2cc': '#fff2cc', // Light yellow
+                        'd6b656': '#d6b656', // Darker yellow/gold
+                        'e1d5e7': '#e1d5e7', // Light purple
+                        '9673a6': '#9673a6', // Darker purple
+                        'ffe6cc': '#ffe6cc', // Light orange
+                        'd79b00': '#d79b00'  // Darker orange
                     };
                     
+                    // Check for color in our expanded map
                     if (colorMap[lowerColor]) {
                         return colorMap[lowerColor];
                     }
@@ -522,6 +742,48 @@ For all items, omitted parameters will use reasonable defaults. For sticky notes
                     // Handle RGB format without # (add the #)
                     if (lowerColor.match(/^[0-9a-f]{6}$/)) {
                         return `#${lowerColor}`;
+                    }
+                    
+                    // Handle shortened RGB format without # (e.g., "f00" for red)
+                    if (lowerColor.match(/^[0-9a-f]{3}$/)) {
+                        return `#${lowerColor[0]}${lowerColor[0]}${lowerColor[1]}${lowerColor[1]}${lowerColor[2]}${lowerColor[2]}`;
+                    }
+                    
+                    // Try to handle any valid hex color, even if it doesn't match standard patterns
+                    if (lowerColor.startsWith('#')) {
+                        // Extract just the hex digits, ignoring any extra characters
+                        const hexDigits = lowerColor.replace(/[^0-9a-f]/g, '');
+                        if (hexDigits.length >= 6) {
+                            // If we have at least 6 hex digits, use the first 6
+                            return `#${hexDigits.substring(0, 6)}`;
+                        } else if (hexDigits.length >= 3) {
+                            // If we have at least 3 hex digits, expand to 6 by doubling each digit
+                            const r = hexDigits[0];
+                            const g = hexDigits[1];
+                            const b = hexDigits[2];
+                            return `#${r}${r}${g}${g}${b}${b}`;
+                        }
+                    }
+                    
+                    // Try to convert any other formats like 'rgb(r,g,b)', etc. into hex
+                    try {
+                        // Handle rgb(...) and rgba(...) formats
+                        if (lowerColor.startsWith('rgb')) {
+                            const rgbMatch = lowerColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*[\d.]+)?\)/);
+                            if (rgbMatch) {
+                                const r = parseInt(rgbMatch[1], 10).toString(16).padStart(2, '0');
+                                const g = parseInt(rgbMatch[2], 10).toString(16).padStart(2, '0');
+                                const b = parseInt(rgbMatch[3], 10).toString(16).padStart(2, '0');
+                                return `#${r}${g}${b}`;
+                            }
+                        }
+                        
+                        // If we can't parse it, use the default
+                        console.log(`Color format '${colorValue}' not recognized, using default #1a1a1a`);
+                        return '#1a1a1a';
+                    } catch (e) {
+                        console.log(`Error parsing color '${colorValue}': ${e}`);
+                        return '#1a1a1a';
                     }
                 }
                 
@@ -771,51 +1033,102 @@ For all items, omitted parameters will use reasonable defaults. For sticky notes
                     normalizedStyle.fillColor.startsWith('#')) {
                     // Map hex colors to nearest predefined color
                     const hexToNameMap: Record<string, string> = {
+                        // Reds
                         '#ff0000': 'red',
                         '#ff3333': 'red',
                         '#ff6666': 'red',
                         '#ff9999': 'light_pink',
                         '#ffcccc': 'light_pink',
                         '#ffaaaa': 'light_pink',
+                        '#ff1493': 'pink',
+                        '#ff69b4': 'pink',
+                        '#ffc0cb': 'light_pink',
+                        '#db7093': 'pink',
+                        
+                        // Greens
                         '#00ff00': 'green',
                         '#33ff33': 'light_green',
                         '#66ff66': 'light_green',
                         '#99ff99': 'light_green',
+                        '#00aa00': 'green',
+                        '#006600': 'dark_green',
+                        '#003300': 'dark_green',
+                        '#90ee90': 'light_green',
+                        '#98fb98': 'light_green',
+                        
+                        // Blues
                         '#0000ff': 'blue',
                         '#3333ff': 'blue',
                         '#6666ff': 'light_blue',
                         '#9999ff': 'light_blue',
+                        '#000080': 'dark_blue',
+                        '#000066': 'dark_blue',
+                        '#0033aa': 'blue',
+                        '#87ceeb': 'light_blue',
+                        '#add8e6': 'light_blue',
+                        
+                        // Yellows
                         '#ffff00': 'yellow',
                         '#ffff33': 'yellow',
                         '#ffff66': 'light_yellow',
                         '#ffff99': 'light_yellow',
+                        '#ffffcc': 'light_yellow',
+                        '#ffeb3b': 'yellow',
+                        '#fff59d': 'light_yellow',
+                        
+                        // Oranges
                         '#ff9900': 'orange',
                         '#ff9933': 'orange',
                         '#ff9966': 'orange',
+                        '#ffa500': 'orange',
+                        '#ff8c00': 'orange',
+                        
+                        // Purples
                         '#cc33ff': 'violet',
                         '#9933ff': 'violet',
+                        '#800080': 'violet',
+                        '#9370db': 'violet',
+                        '#ba55d3': 'violet',
+                        '#8a2be2': 'violet',
+                        
+                        // Cyans
+                        '#00ffff': 'cyan',
+                        '#00cccc': 'cyan',
+                        '#00aaaa': 'cyan',
+                        '#008080': 'cyan',
+                        '#20b2aa': 'cyan',
+                        '#40e0d0': 'cyan',
+                        
+                        // Grays & Blacks
                         '#ffffff': 'gray',
                         '#f8f8f8': 'gray',
                         '#eeeeee': 'gray',
                         '#dddddd': 'gray',
                         '#cccccc': 'gray',
-                        '#000000': 'black',
-                        '#333333': 'black',
-                        '#666666': 'dark_blue',
+                        '#bbbbbb': 'gray',
+                        '#aaaaaa': 'gray',
+                        '#999999': 'gray',
                         '#888888': 'gray',
-                        '#0052CC': 'blue',
-                        '#00CCCC': 'cyan'
+                        '#777777': 'gray',
+                        '#666666': 'dark_blue',
+                        '#555555': 'black',
+                        '#444444': 'black',
+                        '#333333': 'black',
+                        '#222222': 'black',
+                        '#111111': 'black',
+                        '#000000': 'black',
                     };
                     
                     // Try to map to a valid color name
                     const lowerHex = normalizedStyle.fillColor.toLowerCase();
                     if (hexToNameMap[lowerHex]) {
                         stickyNoteStyle.fillColor = hexToNameMap[lowerHex];
-                        console.log(`Converted hex color ${lowerHex} to Miro sticky note color ${hexToNameMap[lowerHex]}`);
+                        console.log(`✓ Converted hex color ${lowerHex} to Miro sticky note color '${hexToNameMap[lowerHex]}'`);
                     } else {
-                        // If no exact match, use a default color
-                        stickyNoteStyle.fillColor = 'yellow';
-                        console.log(`Cannot map hex color ${lowerHex} to a Miro sticky note color. Using default 'yellow'.`);
+                        // If no exact match, find the closest color
+                        const closestColor = findClosestStickyNoteColor(lowerHex);
+                        stickyNoteStyle.fillColor = closestColor;
+                        console.log(`✓ Mapped hex color ${lowerHex} to closest Miro sticky note color '${closestColor}'`);
                     }
                 } else if (typeof normalizedStyle.fillColor === 'string') {
                     // Check if it's a valid sticky note color name
@@ -849,9 +1162,26 @@ For all items, omitted parameters will use reasonable defaults. For sticky notes
                         'orange': 'orange',
                         'violet': 'violet',
                         'purple': 'violet',
+                        'lavender': 'violet',
                         'cyan': 'cyan',
                         'aqua': 'cyan',
                         'teal': 'cyan',
+                        'turquoise': 'cyan',
+                        'skyblue': 'light_blue',
+                        'sky-blue': 'light_blue',
+                        'sky_blue': 'light_blue',
+                        'lime': 'light_green',
+                        'limegreen': 'light_green',
+                        'lime-green': 'light_green',
+                        'lime_green': 'light_green',
+                        'forest': 'dark_green',
+                        'forestgreen': 'dark_green',
+                        'forest-green': 'dark_green',
+                        'forest_green': 'dark_green',
+                        'navy': 'dark_blue',
+                        'navyblue': 'dark_blue',
+                        'navy-blue': 'dark_blue',
+                        'navy_blue': 'dark_blue',
                         'gray': 'gray',
                         'grey': 'gray',
                         'black': 'black'
@@ -868,6 +1198,7 @@ For all items, omitted parameters will use reasonable defaults. For sticky notes
                         stickyNoteStyle.fillColor = 'yellow';
                         console.log(`Color name '${colorName}' is not a valid Miro sticky note color. Using default 'yellow'.`);
                         console.log(`Valid sticky note colors are: ${validStickyNoteColors.join(', ')}`);
+                        console.log(`Consider using one of the following color names: yellow, blue, green, pink, orange, violet, cyan, gray, black, light_yellow, light_green, light_blue, light_pink, dark_green, dark_blue`);
                     }
                 } else {
                     // Default to yellow for any other type
@@ -960,6 +1291,26 @@ For all items, omitted parameters will use reasonable defaults. For sticky notes
         // Build the API request based on action
         switch (action) {
             case 'create':
+                // Position validation for parent frames
+                if (parent && body.position) {
+                    const position = body.position as Record<string, unknown>;
+                    if (position.relativeTo === 'parent_top_left') {
+                        // Ensure position values are positive when using parent_top_left
+                        const xPos = typeof position.x === 'number' ? position.x : 0;
+                        const yPos = typeof position.y === 'number' ? position.y : 0;
+                        
+                        if (xPos < 0 || yPos < 0) {
+                            console.warn(`Warning: Negative position values (x: ${xPos}, y: ${yPos}) with parent_top_left may cause errors.`);
+                            console.warn(`When positioning items inside a frame with relativeTo: "parent_top_left", use positive values.`);
+                            console.warn(`Converting to positive values to avoid API errors.`);
+                            
+                            // Convert to positive values
+                            position.x = Math.max(0, xPos);
+                            position.y = Math.max(0, yPos);
+                        }
+                    }
+                }
+                
                 url = `/v2/boards/${miroBoardId}/${type === 'sticky_note' ? 'sticky_notes' : `${type}s`}`;
                 method = 'post';
                 break;
@@ -1053,7 +1404,7 @@ For all items, omitted parameters will use reasonable defaults. For sticky notes
                 } else if (axiosError.response.status === 400 && style && type === 'sticky_note') {
                     // More specific error for sticky note color issues
                     const validColors = ['gray', 'light_yellow', 'yellow', 'orange', 'light_green', 'green', 'dark_green', 'cyan', 'light_pink', 'pink', 'violet', 'red', 'light_blue', 'blue', 'dark_blue', 'black'];
-                    return formatApiError(error, `Error: Invalid style properties for sticky note. Sticky notes only accept specific named colors: ${validColors.join(', ')}. Hex color values are not supported for sticky notes.`);
+                    return formatApiError(error, `Error: Invalid style properties for sticky note. Sticky notes only accept specific named colors: ${validColors.join(', ')}. The system attempted to map your color to a valid sticky note color but failed. Try using one of the valid color names directly.`);
                 } else if (axiosError.response.status === 400 && data?.content && containsHtml(data.content)) {
                     // Improved error message for HTML formatting issues with specific advice
                     const supportedTags = ['p', 'a', 'strong', 'b', 'em', 'i', 'u', 's', 'span', 'ol', 'ul', 'li', 'br'];
@@ -1090,7 +1441,11 @@ For all items, omitted parameters will use reasonable defaults. For sticky notes
                     return formatApiError(error, errorMessage);
                 } else if (axiosError.response.status === 400 && style && style.color) {
                     // Enhanced error for color format issues with examples
-                    return formatApiError(error, `Error: Invalid color format. Colors must be valid hex values (e.g., "#FF0000" for red) or named colors. Make sure to include the # prefix for hex colors. Examples: "#000000" (black), "#FF0000" (red), "#0000FF" (blue).`);
+                    return formatApiError(error, `Error: Invalid color format. For best results with Miro:
+1. Use standard hex codes with # prefix (e.g., "#FF0000" for red)
+2. Use common named colors (e.g., "blue", "green", "red")
+3. For sticky notes, use only Miro's supported colors ("yellow", "blue", "green", etc.)
+4. The system will try to convert other formats (RGB, shorthand hex, etc.) but this may not always succeed`);
                 } else if (axiosError.response.status === 400 && style && style.fontFamily) {
                     // Specific error for font family issues
                     const supportedFonts = [
@@ -1107,8 +1462,13 @@ For all items, omitted parameters will use reasonable defaults. For sticky notes
                     console.error(`Style properties that might be causing issues: ${JSON.stringify(style)}`);
                     return formatApiError(error, `Error: Invalid style properties for ${type}. For colors, use hex format like "#FF0000" or valid color names. For text, use properties like color, fontFamily, fontSize, textAlign. For shapes, you can also use borderColor, borderWidth, fillColor, fillOpacity.`);
                 } else if (axiosError.response.status === 400 && parent) {
-                    // Position outside parent boundaries
-                    return formatApiError(error, `Error: Position is outside parent frame boundaries. When placing items in a frame, ensure coordinates are within the frame's dimensions or use 'parent_top_left' as the relativeTo reference.`);
+                    // Position outside parent boundaries - more helpful error
+                    return formatApiError(error, `Error: Position is outside parent frame boundaries. 
+When placing items in a frame:
+1. Use "relativeTo": "parent_top_left" in the position object
+2. Use positive coordinates (x and y should be >= 0)
+3. Coordinates should be within the frame's dimensions
+4. Example: {"x": 10, "y": 10, "relativeTo": "parent_top_left"}`);
                 } else if (axiosError.response.status === 413) {
                     // Content too large error
                     return formatApiError(error, `Error: Content is too large. Miro text elements have a limit of 6,000 characters.`);
@@ -1184,4 +1544,69 @@ const validateAndCorrectHtml = (html: string): { corrected: string; changes: str
   }
   
   return { corrected, changes };
+};
+
+// Helper function to find the closest Miro sticky note color to a given hex color
+const findClosestStickyNoteColor = (hexColor: string): string => {
+    // Make sure we have a valid hex color
+    if (!hexColor.startsWith('#')) {
+        hexColor = `#${hexColor}`;
+    }
+    
+    // Handle potential parsing errors with a try-catch
+    try {
+        // Hex to RGB conversion
+        const r = parseInt(hexColor.slice(1, 3), 16);
+        const g = parseInt(hexColor.slice(3, 5), 16);
+        const b = parseInt(hexColor.slice(5, 7), 16);
+        
+        // Check for NaN values which would indicate a parsing error
+        if (isNaN(r) || isNaN(g) || isNaN(b)) {
+            console.log(`Warning: Could not parse hex color '${hexColor}'. Defaulting to 'yellow'.`);
+            return 'yellow';
+        }
+        
+        // Define Miro sticky note colors in RGB
+        const stickyNoteColorsRGB: Record<string, number[]> = {
+            'yellow': [255, 255, 0],
+            'light_yellow': [255, 255, 153],
+            'orange': [255, 165, 0],
+            'red': [255, 0, 0],
+            'pink': [255, 192, 203],
+            'light_pink': [255, 182, 193],
+            'violet': [138, 43, 226],
+            'blue': [0, 0, 255],
+            'light_blue': [173, 216, 230],
+            'dark_blue': [0, 0, 139],
+            'cyan': [0, 255, 255],
+            'green': [0, 128, 0],
+            'light_green': [144, 238, 144],
+            'dark_green': [0, 100, 0],
+            'gray': [128, 128, 128],
+            'black': [0, 0, 0]
+        };
+        
+        // Find the closest color using color distance (Euclidean distance in RGB space)
+        let closestColor = 'yellow'; // Default
+        let minDistance = Infinity;
+        
+        for (const [colorName, colorRGB] of Object.entries(stickyNoteColorsRGB)) {
+            const distance = Math.sqrt(
+                Math.pow(r - colorRGB[0], 2) +
+                Math.pow(g - colorRGB[1], 2) +
+                Math.pow(b - colorRGB[2], 2)
+            );
+            
+            if (distance < minDistance) {
+                minDistance = distance;
+                closestColor = colorName;
+            }
+        }
+        
+        console.log(`Color mapping: '${hexColor}' → Miro '${closestColor}' (distance: ${Math.round(minDistance)})`);
+        return closestColor;
+    } catch (e) {
+        console.log(`Error calculating color distance for '${hexColor}': ${e}. Defaulting to 'yellow'.`);
+        return 'yellow';
+    }
 }; 
