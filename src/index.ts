@@ -2,20 +2,24 @@ import { FastMCP, ServerOptions } from 'fastmcp';
 import { port } from './config';
 import { 
     boardOperationsTool, 
-    itemListOperationsTool, 
     itemPositionOperationsTool, 
     itemDeletionOperationsTool,
     bulkItemCreationTool
 } from './tools/core-tools';
 import { contentItemOperationsTool } from './tools/content-tools';
 import { mediaItemOperationsTool } from './tools/media-tools';
-import { frameOperationsTool, groupOperationsTool, tagOperationsTool, tagItemOperationsTool } from './tools/organization-tools';
+import { 
+    groupOperationsTool, 
+    tagOperationsTool,
+} from './tools/organization-tools';
 import { connectorOperationsTool } from './tools/connector-tools';
 import { widgetOperationsTool, collaborationOperationsTool, appCardOperationsTool } from './tools/collaboration-tools';
-import { boardStateOperationsTool, hierarchyOperationsTool } from './tools/state-tools';
 import { 
-    searchElementsByContentTool, 
-    checkForSimilarContentTool
+    hierarchyOperationsTool
+} from './tools/state-tools';
+import { 
+    checkForSimilarContentTool,
+    unifiedSearchTool as searchTool
 } from './tools/search-tools';
 
 // Create the server with enhanced error handling
@@ -71,12 +75,13 @@ const server = new FastMCP({
 // Register tools in order of importance
 
 // 1. Context Understanding Tools
-server.addTool(boardStateOperationsTool);
+// server.addTool(boardStateOperationsTool); // Partially replaced by searchTool for area and content filtering
 server.addTool(hierarchyOperationsTool);
-server.addTool(itemListOperationsTool);
+// server.addTool(itemListOperationsTool); // Commented out: Replaced by searchTool for better type filtering and pagination
 
 // 2. Search and Discovery Tools
-server.addTool(searchElementsByContentTool);
+server.addTool(searchTool);
+// server.addTool(searchElementsByContentTool); // Commented out: Replaced by searchTool with enhanced text search capabilities
 server.addTool(checkForSimilarContentTool);
 
 // 3. Visual Content Tools - Prioritized for visual tasks
@@ -91,11 +96,11 @@ server.addTool(itemPositionOperationsTool);
 server.addTool(itemDeletionOperationsTool);
 
 // 5. Organization and Structure Tools
-server.addTool(frameOperationsTool);
+// server.addTool(frameOperationsTool); // Commented out: Replaced by searchTool with parent_id filtering
 server.addTool(connectorOperationsTool);
 server.addTool(groupOperationsTool);
 server.addTool(tagOperationsTool);
-server.addTool(tagItemOperationsTool);
+// server.addTool(tagItemOperationsTool); // Commented out: Replaced by searchTool with tag-based filtering
 
 // 6. Collaboration Tools
 server.addTool(widgetOperationsTool);
