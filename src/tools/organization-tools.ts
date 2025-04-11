@@ -20,11 +20,11 @@ const FrameOperationsSchema = z.object({
     data: FrameDataSchema.optional().describe('Frame data for create or update actions.'),
     style: FrameStyleSchema.optional().describe('Frame styling for create or update actions.'),
     position: z.object({
-        x: z.number().describe('X-axis coordinate.'),
-        y: z.number().describe('Y-axis coordinate.'),
-        origin: z.enum(['center']).optional().describe('Origin point for coordinates.'),
-        relativeTo: z.enum(['canvas_center', 'parent_top_left']).optional().describe('Coordinate system reference.')
-    }).optional().describe('Position for create or update actions.'),
+        x: z.number().describe('X-axis coordinate in pixels.'),
+        y: z.number().describe('Y-axis coordinate in pixels.'),
+        origin: z.enum(['center']).optional().default('center').describe('Origin point for coordinates, currently only "center" is supported.'),
+        relativeTo: z.enum(['canvas_center', 'parent_top_left']).optional().default('canvas_center').describe('Coordinate system reference. Use "canvas_center" for absolute positioning on the board. Use "parent_top_left" only when positioning items inside a frame.')
+    }).optional().describe('Position for create or update actions. When creating a frame, position is relative to the canvas center by default.'),
     geometry: z.object({
         width: z.number().optional().describe('Width in pixels.'),
         height: z.number().optional().describe('Height in pixels.'),
@@ -87,7 +87,7 @@ type TagItemOperationsParams = z.infer<typeof TagItemOperationsSchema>;
 // Fully implemented frame operations tool
 export const frameOperationsTool: ToolDefinition<FrameOperationsParams> = {
     name: 'mcp_miro_frame_operations',
-    description: 'Creates and manages containment areas (frames) that visually organize content on Miro boards. Use this tool to: (1) create - add new rectangular containers with customizable size, position, and background color, (2) get - retrieve a specific frame\'s details, (3) get_all - list all frames on the board, (4) get_items - list all items contained within a specific frame, (5) update - modify an existing frame\'s properties, (6) delete - remove a frame entirely. Frames are rectangular containers that visually group related items and can have titles for labeling sections of your board. When items are placed inside a frame, they become children of that frame and move with it when the frame is repositioned. Frames can be used to create distinct sections on a board, organize related content, or define swimlanes in process diagrams. Frame deletion will not delete its contained items - they will remain on the board but will no longer be contained.',
+    description: 'Creates and manages containment areas (frames) that visually organize content on Miro boards. Use this tool to: (1) create - add new rectangular containers with customizable size, position, and background color, (2) get - retrieve a specific frame\'s details, (3) get_all - list all frames on the board, (4) get_items - list all items contained within a specific frame, (5) update - modify an existing frame\'s properties, (6) delete - remove a frame entirely. Frames are rectangular containers that visually group related items and can have titles for labeling sections of your board. When items are placed inside a frame, they become children of that frame and move with it when the frame is repositioned. POSITIONING: Frames are positioned using x,y coordinates. By default, coordinates are relative to the canvas center (0,0), where positive x moves right and positive y moves down. When positioning items inside a frame, use "relativeTo": "parent_top_left" to specify coordinates measured from the frame\'s top-left corner. Frame deletion will not delete its contained items - they will remain on the board but will no longer be contained.',
     parameters: FrameOperationsSchema,
     execute: async (args) => {
         const { action, item_id, ...requestBody } = args;
@@ -98,8 +98,28 @@ export const frameOperationsTool: ToolDefinition<FrameOperationsParams> = {
 
         // Normalize geometry values
         const normalizedGeometry = normalizeGeometryValues(requestBody.geometry);
+        
+        // Normalize position values but preserve relativeTo for validation
+        let positionHasRelativeTo = false;
+        let relativeTo = 'canvas_center';  // Default value
+        
+        if (requestBody.position && 'relativeTo' in requestBody.position) {
+            positionHasRelativeTo = true;
+            relativeTo = requestBody.position.relativeTo as string;
+        }
+        
         // Normalize position values
         const normalizedPosition = normalizePositionValues(requestBody.position);
+        
+        // Add validation warning for parent_top_left without parent
+        if (positionHasRelativeTo && relativeTo === 'parent_top_left' && action === 'create') {
+            console.warn(`Warning: relativeTo="parent_top_left" is specified for a frame, but frames cannot be parented to other frames. Using canvas_center instead.`);
+            // Force relativeTo to be canvas_center for frames
+            if (normalizedPosition) {
+                (normalizedPosition as Record<string, unknown>).relativeTo = 'canvas_center';
+            }
+        }
+        
         // Normalize style values
         const normalizedStyle = normalizeStyleValues(requestBody.style);
 
@@ -183,6 +203,30 @@ export const frameOperationsTool: ToolDefinition<FrameOperationsParams> = {
             console.log(`API Call Successful: ${response.status}`);
             return formatApiResponse(response.data);
         } catch (error) {
+            // Enhance error reporting for positioning issues
+            if (error && typeof error === 'object' && 'response' in error) {
+                const errorResponse = (error as { 
+                    response: { 
+                        status: number; 
+                        data?: { 
+                            message?: string; 
+                            error?: string; 
+                        } 
+                    } 
+                }).response;
+                if (errorResponse?.status === 400) {
+                    const errorData = errorResponse.data;
+                    const errorMessage = errorData?.message || errorData?.error || JSON.stringify(errorData);
+                    
+                    // Check for position-related errors
+                    if (typeof errorMessage === 'string' && 
+                        (errorMessage.includes('position') || errorMessage.includes('outside of parent'))) {
+                        
+                        return formatApiError(error, `Position Error: ${errorMessage}. For frames, use "relativeTo": "canvas_center". When positioning items inside frames, use "relativeTo": "parent_top_left" and ensure coordinates are within the frame's bounds.`);
+                    }
+                }
+            }
+            
             return formatApiError(error);
         }
     },

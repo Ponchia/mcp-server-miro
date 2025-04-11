@@ -18,27 +18,36 @@ export interface MiroItem {
     details?: Record<string, unknown>;
     parent?: { id: string; [key: string]: unknown };
     content_summary?: string;
+    tagIds?: string[];
     [key: string]: unknown;
 }
 
 export interface MiroFrame extends MiroItem {
     childItems?: MiroItem[];
+    childItemIds?: string[];
 }
 
 export interface MiroGroup {
     id: string;
     childItems?: MiroItem[];
+    childItemIds?: string[];
     [key: string]: unknown;
 }
 
 export interface MiroTag {
     id: string;
     items?: MiroItem[];
+    itemIds?: string[];
     [key: string]: unknown;
 }
 
 export interface MiroComment {
     id: string;
+    content?: string;
+    author?: string;
+    itemId?: string;
+    position?: { x: number; y: number };
+    createdAt?: string;
     [key: string]: unknown;
 }
 
@@ -75,6 +84,21 @@ export interface ConnectivityDetails {
     bidirectional: string[];
 }
 
+// Connection analysis types
+export interface ConnectionAnalysis {
+    duplicateConnections: Array<{
+        items: [string, string];
+        connectorIds: string[];
+    }>;
+    orphanedConnectors: string[];
+    potentialIssues: string[];
+    itemsWithManyConnections: Array<{
+        itemId: string;
+        connectionCount: number;
+        connectorIds: string[];
+    }>;
+}
+
 export interface StructuralSummary {
     totalItems: number;
     itemsByType: Record<string, number>;
@@ -84,7 +108,31 @@ export interface StructuralSummary {
         totalConnections: number;
         bidirectionalPairs: number;
         maxConnections: number;
+        duplicateConnections?: number;
+        orphanedConnectors?: number;
     };
+}
+
+// Board metadata type
+export interface BoardMetadata {
+    timestamp: string;
+    itemCount: number;
+    frameCount: number;
+    groupCount: number;
+    connectorCount: number;
+    tagCount: number;
+    commentCount: number;
+    hasItemLimit?: boolean;
+    itemLimit?: number;
+    limitReached?: boolean;
+    includeItemContent?: boolean;
+    includeComments?: boolean;
+    includeTags?: boolean;
+    includeHistory?: boolean;
+    includeConnectivity?: boolean;
+    frameId?: string;
+    searchTerm?: string;
+    filteredItemCount?: number;
 }
 
 // Complete board state type
@@ -93,23 +141,16 @@ export interface BoardState {
     items: MiroItem[];
     frames: MiroFrame[];
     groups: MiroGroup[];
-    connectors: MiroConnector[];
+    connectors?: MiroConnector[];
     tags: MiroTag[];
-    comments: MiroComment[];
-    connectivity: {
+    comments?: MiroComment[];
+    connectivity?: {
         map: Record<string, string[]>;
         details: Record<string, ConnectivityDetails>;
     };
+    connectionAnalysis?: ConnectionAnalysis;
     summary: StructuralSummary;
-    metadata: {
-        timestamp: string;
-        itemCount: number;
-        frameCount: number;
-        groupCount: number;
-        connectorCount: number;
-        tagCount: number;
-        commentCount: number;
-    };
+    metadata: BoardMetadata;
     history?: {
         recently_created: Array<{id: string, type: string, summary: string, timestamp: string}>;
         recently_modified: Array<{id: string, type: string, summary: string, timestamp: string}>;

@@ -15,7 +15,10 @@ const completeBoardSchema = z.object({
     include_content_summaries: z.boolean().optional().default(true).describe('Whether to include content summaries for text items.'),
     include_connectivity: z.boolean().optional().default(false).describe('Whether to include detailed connectivity maps (increases payload size).'),
     max_items: z.number().optional().default(500).describe('Maximum number of items to include in response (use 0 for unlimited).'),
-    item_types: z.array(z.string()).optional().describe('Filter to specific item types (e.g., ["text", "sticky_note"]).')
+    item_types: z.array(z.string()).optional().describe('Filter to specific item types (e.g., ["text", "sticky_note"]).'),
+    frame_id: z.string().optional().describe('ID of a specific frame to analyze. Only returns items within this frame.'),
+    search_term: z.string().optional().describe('Search term to filter items by content or attributes.'),
+    connection_analysis: z.boolean().optional().default(false).describe('Perform detailed analysis of connections to detect potential duplicates or orphaned connectors.')
 });
 
 const itemTreeSchema = z.object({
@@ -51,12 +54,30 @@ interface BoardMetadata {
     includeTags?: boolean;
     includeHistory?: boolean;
     includeConnectivity?: boolean;
+    frameId?: string;
+    searchTerm?: string;
+    filteredItemCount?: number;
+}
+
+// Connection analysis interface
+interface ConnectionAnalysis {
+    duplicateConnections: Array<{
+        items: [string, string],
+        connectorIds: string[]
+    }>;
+    orphanedConnectors: string[];
+    potentialIssues: string[];
+    itemsWithManyConnections: Array<{
+        itemId: string,
+        connectionCount: number,
+        connectorIds: string[]
+    }>;
 }
 
 // Tool: Board State Operations
 export const boardStateOperationsTool: ToolDefinition<CompleteBoardParams> = {
     name: 'mcp_miro_board_state_operations',
-    description: 'Captures a complete snapshot of all board content and relationships for comprehensive understanding or analysis. Use this tool to: (1) retrieve all board items with their properties, content, positions, and connections, (2) analyze board structure including frames, groups, tags, and connectors, (3) gather statistics about item types, connectivity, and organization, (4) access modification history showing recently created or updated items. This tool provides the most comprehensive view of a Miro board with configurable detail levels via parameters. You can include or exclude item content details, comments, tag relationships, modification history, and connectivity maps to control response size and focus. The board state includes a structural summary with counts by item type, connection statistics, and hierarchical relationships. For large boards, you can limit the number of items returned. This tool is ideal for gaining a complete understanding of complex boards before making changes, analyzing relationships between items, or accessing board-wide statistics. Response includes both the raw data and helpful metadata to navigate the content.',
+    description: 'Captures a comprehensive snapshot of board content with powerful filtering and analysis capabilities. Use this tool to: (1) Get complete board state or focus on specific sections by frame ID, item types, or search terms, (2) Analyze board structure including frames, groups, tags, and connectors with optional connectivity maps, (3) Detect duplicate connections, orphaned connectors, and other structural issues, (4) Retrieve modification history showing recently created or updated items. This enhanced tool provides precise control over what content to retrieve through multiple filtering mechanisms: limit response to specific frames, filter by item types, search for content matching specific terms, or focus on analyzing connection patterns. For large boards, you can limit items returned or focus on subsets of content to improve efficiency. The tool helps detect potential issues like duplicate connections between the same items or connectors that might be problematic. Response includes both raw data and helpful metadata with statistics to guide further operations. Use filtering options to reduce payload size when working with large complex boards.',
     parameters: completeBoardSchema,
     execute: async (args) => {
         console.log(`Executing mcp_miro_board_state_operations with params: ${JSON.stringify(args)}`);
@@ -68,31 +89,92 @@ export const boardStateOperationsTool: ToolDefinition<CompleteBoardParams> = {
             include_content_summaries,
             include_connectivity,
             max_items,
-            item_types
+            item_types,
+            frame_id,
+            search_term,
+            connection_analysis
         } = args;
 
         try {
             // Step 1: Get board info
             const boardResponse = await miroClient.get(`/v2/boards/${miroBoardId}`);
             const boardInfo = boardResponse.data;
+            
+            // Step 2: If frame_id is provided, first verify it exists
+            let frameInfo = null;
+            if (frame_id) {
+                try {
+                    const frameResponse = await miroClient.get(`/v2/boards/${miroBoardId}/frames/${frame_id}`);
+                    frameInfo = frameResponse.data;
+                    console.log(`Found frame: ${frameInfo.id}`);
+                } catch (error) {
+                    return formatApiError(error, `Frame with ID ${frame_id} not found or not accessible.`);
+                }
+            }
 
-            // Step 2: Get all items (paginate if needed)
+            // Step 3: Get all items (paginate if needed)
             let allItems: MiroItem[] = [];
             let cursor: string | null = null;
             let itemCount = 0;
             const hasItemLimit = max_items > 0;
+            
+            // Build query parameters with all available filters
+            const queryParams: Record<string, string | string[]> = { limit: '50' };
+            if (item_types && item_types.length > 0) queryParams.type = item_types;
+            
+            // If frame_id is specified, we'll filter items after retrieval
+            // (Miro API doesn't support direct filtering by parent frame)
 
             do {
-                const params: Record<string, string | string[]> = { limit: '50' };
-                if (cursor) params.cursor = cursor;
-                if (item_types && item_types.length > 0) params.type = item_types;
+                if (cursor) queryParams.cursor = cursor;
                 
-                const itemsResponse = await miroClient.get(`/v2/boards/${miroBoardId}/items`, { params });
+                const itemsResponse = await miroClient.get(`/v2/boards/${miroBoardId}/items`, { params: queryParams });
                 const itemsData = itemsResponse.data;
                 
                 if (itemsData.data && itemsData.data.length > 0) {
+                    let newItems = itemsData.data;
+                    
+                    // Apply frame filtering if frame_id is provided
+                    if (frame_id) {
+                        newItems = newItems.filter(item => 
+                            item.parent && 
+                            typeof item.parent === 'object' && 
+                            'id' in item.parent && 
+                            item.parent.id === frame_id
+                        );
+                    }
+                    
+                    // Apply search term filtering if provided
+                    if (search_term && search_term.trim() !== '') {
+                        const searchLower = search_term.toLowerCase();
+                        newItems = newItems.filter((item: MiroItem) => {
+                            // Search in item ID
+                            if (item.id.toLowerCase().includes(searchLower)) return true;
+                            
+                            // Search in item type
+                            if (item.type.toLowerCase().includes(searchLower)) return true;
+                            
+                            // Search in data content if available
+                            if (item.data && typeof item.data === 'object') {
+                                if ('content' in item.data && 
+                                    typeof item.data.content === 'string' && 
+                                    item.data.content.toLowerCase().includes(searchLower)) {
+                                    return true;
+                                }
+                                
+                                // Search in title if available
+                                if ('title' in item.data && 
+                                    typeof item.data.title === 'string' && 
+                                    item.data.title.toLowerCase().includes(searchLower)) {
+                                    return true;
+                                }
+                            }
+                            
+                            return false;
+                        });
+                    }
+                    
                     // Apply item limit if set
-                    const newItems = itemsData.data;
                     if (hasItemLimit && itemCount + newItems.length > max_items) {
                         // Add only up to the max items limit
                         allItems = [...allItems, ...newItems.slice(0, max_items - itemCount)];
@@ -107,7 +189,7 @@ export const boardStateOperationsTool: ToolDefinition<CompleteBoardParams> = {
                 cursor = itemsData.cursor || null;
             } while (cursor && (!hasItemLimit || itemCount < max_items));
 
-            // Step 3: Get full content only for text-containing items if requested
+            // Step 4: Get full content only for text-containing items if requested
             if (include_item_content) {
                 // Identify item types that typically contain meaningful text content
                 const textItemTypes = ['shape', 'text', 'sticky_note', 'card', 'app_card'];
@@ -156,12 +238,14 @@ export const boardStateOperationsTool: ToolDefinition<CompleteBoardParams> = {
                 }
             }
 
-            // Step 4: Find frame relationships
+            // Step 5: Find frame relationships
             // Use more efficient algorithm to avoid duplicating items
             const boardFrames: MiroFrame[] = [];
             
-            // First get all frames
-            const frames = allItems.filter(item => item.type === 'frame') as MiroFrame[];
+            // First get all frames (possibly filtered by frame_id)
+            const frames = frame_id 
+                ? allItems.filter(item => item.type === 'frame' && item.id === frame_id) as MiroFrame[]
+                : allItems.filter(item => item.type === 'frame') as MiroFrame[];
             
             // Then find child relationships without duplicating the items
             for (const frame of frames) {
@@ -181,7 +265,7 @@ export const boardStateOperationsTool: ToolDefinition<CompleteBoardParams> = {
                 });
             }
 
-            // Step 5: Get groups (summarized version)
+            // Step 6: Get groups (summarized version)
             const boardGroups: MiroGroup[] = [];
             try {
                 const groupsResponse = await miroClient.get(`/v2/boards/${miroBoardId}/groups`);
@@ -194,16 +278,38 @@ export const boardStateOperationsTool: ToolDefinition<CompleteBoardParams> = {
                             // Store just IDs instead of duplicating the items
                             const childItemIds = (groupItemsResponse.data.data || []).map((item: MiroItem) => item.id);
                             
-                            boardGroups.push({
-                                ...group,
-                                childItemIds
-                            });
+                            // Filter groups based on frame_id if specified
+                            if (frame_id) {
+                                // Only include the group if at least one of its items is in the specified frame
+                                const hasItemsInFrame = childItemIds.some((itemId: string) => {
+                                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                    const item = allItems.find((i: any) => i.id === itemId);
+                                    return item && item.parent && typeof item.parent === 'object' && 
+                                           'id' in item.parent && item.parent.id === frame_id;
+                                });
+                                
+                                if (hasItemsInFrame) {
+                                    boardGroups.push({
+                                        ...group,
+                                        childItemIds
+                                    });
+                                }
+                            } else {
+                                boardGroups.push({
+                                    ...group,
+                                    childItemIds
+                                });
+                            }
                         } catch (error) {
                             console.error(`Error getting items for group ${group.id}: ${error}`);
-                            boardGroups.push({
-                                ...group,
-                                childItemIds: []
-                            });
+                            
+                            // Still include the group with empty children if not filtering by frame
+                            if (!frame_id) {
+                                boardGroups.push({
+                                    ...group,
+                                    childItemIds: []
+                                });
+                            }
                         }
                     }
                 }
@@ -211,28 +317,74 @@ export const boardStateOperationsTool: ToolDefinition<CompleteBoardParams> = {
                 console.error(`Error getting groups: ${error}`);
             }
 
-            // Step 6: Get comments if requested (limit to essential data)
+            // Step 7: Get comments if requested (limit to essential data)
             const boardComments: MiroComment[] = [];
             if (include_comments) {
                 try {
                     const commentsResponse = await miroClient.get(`/v2/boards/${miroBoardId}/comments`);
                     if (commentsResponse.data.data) {
                         // Extract only essential comment data
-                        boardComments.push(...commentsResponse.data.data.map((comment: any) => ({
+                        const allComments = commentsResponse.data.data.map((comment: {
+                            id: string;
+                            data?: {
+                                content?: string;
+                                author?: string;
+                                itemId?: string;
+                                position?: {x: number; y: number};
+                                createdAt?: string;
+                            };
+                        }) => ({
                             id: comment.id,
                             content: comment.data?.content,
                             author: comment.data?.author,
                             itemId: comment.data?.itemId,
                             position: comment.data?.position,
                             createdAt: comment.data?.createdAt
-                        })));
+                        }));
+                        
+                        // Filter comments by frame_id if specified
+                        if (frame_id) {
+                            // Include comments attached to items in this frame
+                            // and standalone comments positioned inside the frame
+                            const frameItems = new Set(allItems
+                                .filter(item => item.parent && typeof item.parent === 'object' && 
+                                       'id' in item.parent && item.parent.id === frame_id)
+                                .map(item => item.id));
+                            
+                            const frameGeometry = frameInfo ? {
+                                x: frameInfo.position.x,
+                                y: frameInfo.position.y,
+                                width: frameInfo.geometry.width,
+                                height: frameInfo.geometry.height
+                            } : null;
+                            
+                            boardComments.push(...allComments.filter((comment: MiroComment) => {
+                                // Include if comment is attached to an item in this frame
+                                if (comment.itemId && frameItems.has(comment.itemId)) {
+                                    return true;
+                                }
+                                
+                                // Include if comment position is inside the frame bounds
+                                if (!comment.itemId && comment.position && frameGeometry) {
+                                    const { x, y } = comment.position;
+                                    return x >= frameGeometry.x - frameGeometry.width/2 && 
+                                           x <= frameGeometry.x + frameGeometry.width/2 &&
+                                           y >= frameGeometry.y - frameGeometry.height/2 &&
+                                           y <= frameGeometry.y + frameGeometry.height/2;
+                                }
+                                
+                                return false;
+                            }));
+                        } else {
+                            boardComments.push(...allComments);
+                        }
                     }
                 } catch (error) {
                     console.error(`Error getting comments: ${error}`);
                 }
             }
 
-            // Step 7: Get tags if requested (optimized)
+            // Step 8: Get tags if requested (optimized)
             const boardTags: MiroTag[] = [];
             const itemTags: Record<string, string[]> = {}; // Maps item IDs to tag IDs
             
@@ -247,27 +399,46 @@ export const boardStateOperationsTool: ToolDefinition<CompleteBoardParams> = {
                             const tagItemsResponse = await miroClient.get(`/v2/boards/${miroBoardId}/tags/${tag.id}/items`);
                             const taggedItems = tagItemsResponse.data.data || [];
                             
+                            // If filtering by frame_id, only include tagged items in this frame
+                            let relevantTaggedItems = taggedItems;
+                            if (frame_id) {
+                                const frameItems = new Set(allItems
+                                    .filter(item => item.parent && typeof item.parent === 'object' && 
+                                           'id' in item.parent && item.parent.id === frame_id)
+                                    .map(item => item.id));
+                                
+                                relevantTaggedItems = taggedItems.filter((item: MiroItem) => 
+                                    frameItems.has(item.id));
+                            }
+                            
                             // Store relationship mapping instead of duplicating items
-                            const itemIds = taggedItems.map((item: MiroItem) => item.id);
+                            const itemIds = relevantTaggedItems.map((item: MiroItem) => item.id);
                             
-                            // Update the mapping from items to tags
-                            itemIds.forEach((itemId: string) => {
-                                if (!itemTags[itemId]) {
-                                    itemTags[itemId] = [];
-                                }
-                                itemTags[itemId].push(tag.id);
-                            });
-                            
-                            boardTags.push({
-                                ...tag,
-                                itemIds // Just store IDs, not the full items
-                            });
+                            // Only add the tag if it has relevant items (when filtering by frame)
+                            if (!frame_id || itemIds.length > 0) {
+                                // Update the mapping from items to tags
+                                itemIds.forEach((itemId: string) => {
+                                    if (!itemTags[itemId]) {
+                                        itemTags[itemId] = [];
+                                    }
+                                    itemTags[itemId].push(tag.id);
+                                });
+                                
+                                boardTags.push({
+                                    ...tag,
+                                    itemIds // Just store IDs, not the full items
+                                });
+                            }
                         } catch (error) {
                             console.error(`Error getting items for tag ${tag.id}: ${error}`);
-                            boardTags.push({
-                                ...tag,
-                                itemIds: []
-                            });
+                            
+                            // Still include the tag with empty items if not filtering by frame
+                            if (!frame_id) {
+                                boardTags.push({
+                                    ...tag,
+                                    itemIds: []
+                                });
+                            }
                         }
                     }
                     
@@ -282,23 +453,70 @@ export const boardStateOperationsTool: ToolDefinition<CompleteBoardParams> = {
                 }
             }
 
-            // Step 8: Build connectivity maps (only if requested)
+            // Step 9: Build connectivity maps and analyze connections
             const boardConnectors = allItems.filter(item => item.type === 'connector') as MiroConnector[];
             
-            let connectivityMap: Record<string, string[]> = {};
-            let connectivityDetails: Record<string, {to: string[], from: string[], bidirectional: string[]}> = {};
+            const connectivityMap: Record<string, string[]> = {};
+            const connectivityDetails: Record<string, {to: string[], from: string[], bidirectional: string[]}> = {};
             
-            if (include_connectivity) {
-                // Initialize maps only for items with connections
+            // Initialize connection analysis data structures
+            const connectionDuplicates: Map<string, string[]> = new Map(); // Maps "itemA-itemB" to array of connector IDs
+            const connectorEndpoints: Map<string, [string, string]> = new Map(); // Maps connector ID to [startItemId, endItemId]
+            const orphanedConnectors: string[] = [];
+            const itemConnectionCounts: Map<string, { count: number, connectorIds: string[] }> = new Map();
+            
+            // Process connectors for connectivity and analysis
+            if (include_connectivity || connection_analysis) {
+                // Identify all connected items first
                 const connectedItemIds = new Set<string>();
                 
-                // Identify all connected items first
                 boardConnectors.forEach(connector => {
-                    if (connector.startItem?.id) connectedItemIds.add(connector.startItem.id);
-                    if (connector.endItem?.id) connectedItemIds.add(connector.endItem.id);
+                    const startItemId = connector.startItem?.id;
+                    const endItemId = connector.endItem?.id;
+                    
+                    // Record all known endpoints
+                    if (startItemId && endItemId) {
+                        connectorEndpoints.set(connector.id, [startItemId, endItemId]);
+                        
+                        // Check for orphaned connectors (referencing non-existent items)
+                        const startExists = allItems.some(item => item.id === startItemId);
+                        const endExists = allItems.some(item => item.id === endItemId);
+                        
+                        if (!startExists || !endExists) {
+                            orphanedConnectors.push(connector.id);
+                        }
+                        
+                        // Track connection counts per item
+                        if (startExists) {
+                            connectedItemIds.add(startItemId);
+                            
+                            if (!itemConnectionCounts.has(startItemId)) {
+                                itemConnectionCounts.set(startItemId, { count: 0, connectorIds: [] });
+                            }
+                            itemConnectionCounts.get(startItemId)!.count++;
+                            itemConnectionCounts.get(startItemId)!.connectorIds.push(connector.id);
+                        }
+                        
+                        if (endExists) {
+                            connectedItemIds.add(endItemId);
+                            
+                            if (!itemConnectionCounts.has(endItemId)) {
+                                itemConnectionCounts.set(endItemId, { count: 0, connectorIds: [] });
+                            }
+                            itemConnectionCounts.get(endItemId)!.count++;
+                            itemConnectionCounts.get(endItemId)!.connectorIds.push(connector.id);
+                        }
+                        
+                        // Check for duplicate connections
+                        const connectionKey = [startItemId, endItemId].sort().join('-');
+                        if (!connectionDuplicates.has(connectionKey)) {
+                            connectionDuplicates.set(connectionKey, []);
+                        }
+                        connectionDuplicates.get(connectionKey)!.push(connector.id);
+                    }
                 });
                 
-                // Initialize maps only for connected items to save memory
+                // Initialize connectivity maps for connected items
                 connectedItemIds.forEach(id => {
                     connectivityMap[id] = [];
                     connectivityDetails[id] = {
@@ -315,33 +533,87 @@ export const boardStateOperationsTool: ToolDefinition<CompleteBoardParams> = {
                         const toId = connector.endItem.id;
                         
                         // Add to general connectivity map (undirected)
-                        if (!connectivityMap[fromId].includes(toId)) {
+                        if (connectivityMap[fromId] && !connectivityMap[fromId].includes(toId)) {
                             connectivityMap[fromId].push(toId);
                         }
-                        if (!connectivityMap[toId].includes(fromId)) {
+                        if (connectivityMap[toId] && !connectivityMap[toId].includes(fromId)) {
                             connectivityMap[toId].push(fromId);
                         }
                         
                         // Add to detailed directional maps
-                        if (!connectivityDetails[fromId].to.includes(toId)) {
+                        if (connectivityDetails[fromId] && !connectivityDetails[fromId].to.includes(toId)) {
                             connectivityDetails[fromId].to.push(toId);
                         }
-                        if (!connectivityDetails[toId].from.includes(fromId)) {
+                        if (connectivityDetails[toId] && !connectivityDetails[toId].from.includes(fromId)) {
                             connectivityDetails[toId].from.push(fromId);
-                        }
-                        
-                        // Check for bidirectional connections
-                        if (connectivityDetails[fromId].from.includes(toId) && 
-                            connectivityDetails[toId].to.includes(fromId)) {
-                            if (!connectivityDetails[fromId].bidirectional.includes(toId)) {
-                                connectivityDetails[fromId].bidirectional.push(toId);
-                            }
-                            if (!connectivityDetails[toId].bidirectional.includes(fromId)) {
-                                connectivityDetails[toId].bidirectional.push(fromId);
-                            }
                         }
                     }
                 });
+                
+                // Identify bidirectional connections
+                for (const itemId in connectivityDetails) {
+                    const details = connectivityDetails[itemId];
+                    details.to.forEach(toId => {
+                        if (details.from.includes(toId) && !details.bidirectional.includes(toId)) {
+                            details.bidirectional.push(toId);
+                            
+                            // Add to the other side's bidirectional list too if it exists
+                            if (connectivityDetails[toId] && !connectivityDetails[toId].bidirectional.includes(itemId)) {
+                                connectivityDetails[toId].bidirectional.push(itemId);
+                            }
+                        }
+                    });
+                }
+            }
+            
+            // Create connection analysis results
+            let connectionAnalysisResults: ConnectionAnalysis | undefined;
+            
+            if (connection_analysis) {
+                // Find actual duplicate connections (more than one connector between same items)
+                const duplicateConnections = Array.from(connectionDuplicates.entries())
+                    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                    .filter(([_duplicateKey, connectorIds]) => connectorIds.length > 1)
+                    .map(([key, connectorIds]) => {
+                        const [item1, item2] = key.split('-');
+                        return {
+                            items: [item1, item2] as [string, string],
+                            connectorIds
+                        };
+                    });
+                
+                // Find items with many connections (potential issues)
+                const manyConnectionsThreshold = 10;
+                const itemsWithManyConnections = Array.from(itemConnectionCounts.entries())
+                    .filter(([_, data]) => data.count >= manyConnectionsThreshold)
+                    .map(([itemId, data]) => ({
+                        itemId,
+                        connectionCount: data.count,
+                        connectorIds: data.connectorIds
+                    }))
+                    .sort((a, b) => b.connectionCount - a.connectionCount);
+                
+                // Generate human-readable issue descriptions
+                const potentialIssues: string[] = [];
+                
+                if (duplicateConnections.length > 0) {
+                    potentialIssues.push(`Found ${duplicateConnections.length} cases of duplicate connections between the same items.`);
+                }
+                
+                if (orphanedConnectors.length > 0) {
+                    potentialIssues.push(`Found ${orphanedConnectors.length} connectors referencing non-existent items.`);
+                }
+                
+                if (itemsWithManyConnections.length > 0) {
+                    potentialIssues.push(`Found ${itemsWithManyConnections.length} items with ${manyConnectionsThreshold}+ connections (maximum: ${itemsWithManyConnections[0]?.connectionCount || 0} connections).`);
+                }
+                
+                connectionAnalysisResults = {
+                    duplicateConnections,
+                    orphanedConnectors,
+                    potentialIssues,
+                    itemsWithManyConnections
+                };
             }
             
             // Create board structure summary
@@ -359,6 +631,8 @@ export const boardStateOperationsTool: ToolDefinition<CompleteBoardParams> = {
                             .reduce((count, detail) => count + detail.bidirectional.length, 0) / 2 : 0, // Divide by 2 to avoid counting twice
                     maxConnections: include_connectivity ? 
                         Math.max(...Object.values(connectivityMap).map(conns => conns ? conns.length : 0), 0) : 0,
+                    duplicateConnections: connection_analysis ? connectionAnalysisResults?.duplicateConnections.length || 0 : undefined,
+                    orphanedConnectors: connection_analysis ? orphanedConnectors.length : undefined
                 }
             };
             
@@ -392,7 +666,10 @@ export const boardStateOperationsTool: ToolDefinition<CompleteBoardParams> = {
                     includeComments: include_comments,
                     includeTags: include_tags,
                     includeHistory: include_history,
-                    includeConnectivity: include_connectivity
+                    includeConnectivity: include_connectivity,
+                    frameId: frame_id,
+                    searchTerm: search_term,
+                    filteredItemCount: allItems.length
                 } as BoardMetadata
             };
             
@@ -407,6 +684,10 @@ export const boardStateOperationsTool: ToolDefinition<CompleteBoardParams> = {
                     map: connectivityMap,
                     details: connectivityDetails
                 };
+            }
+            
+            if (connection_analysis && connectionAnalysisResults) {
+                boardState.connectionAnalysis = connectionAnalysisResults;
             }
             
             boardState.summary = structuralSummary;

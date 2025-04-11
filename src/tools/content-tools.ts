@@ -5,6 +5,63 @@ import { normalizeStyleValues, normalizeGeometryValues, normalizePositionValues,
 import { ToolDefinition } from '../types/tool-types';
 import { miroBoardId } from '../config';
 
+// HTML processing functions
+/**
+ * Detects if text contains HTML markup
+ */
+const containsHtml = (text: string): boolean => {
+  const htmlRegex = /<([a-z][a-z0-9]*)\b[^>]*>(.*?)<\/\1>/i;
+  return htmlRegex.test(text);
+};
+
+/**
+ * Converts HTML to rich text format that Miro can handle
+ * Basic converter that handles common HTML tags
+ */
+const convertHtmlToPlainText = (html: string): string => {
+  if (!containsHtml(html)) return html;
+  
+  let result = html;
+  
+  // Replace heading tags with text and newlines
+  result = result.replace(/<h1[^>]*>(.*?)<\/h1>/gi, '$1\n');
+  result = result.replace(/<h2[^>]*>(.*?)<\/h2>/gi, '$1\n');
+  result = result.replace(/<h3[^>]*>(.*?)<\/h3>/gi, '$1\n');
+  result = result.replace(/<h4[^>]*>(.*?)<\/h4>/gi, '$1\n');
+  result = result.replace(/<h5[^>]*>(.*?)<\/h5>/gi, '$1\n');
+  result = result.replace(/<h6[^>]*>(.*?)<\/h6>/gi, '$1\n');
+  
+  // Replace paragraph tags
+  result = result.replace(/<p[^>]*>(.*?)<\/p>/gi, '$1\n');
+  
+  // Replace list items
+  result = result.replace(/<li[^>]*>(.*?)<\/li>/gi, '• $1\n');
+  
+  // Replace br tags
+  result = result.replace(/<br\s*\/?>/gi, '\n');
+  
+  // Replace formatting tags
+  result = result.replace(/<b[^>]*>(.*?)<\/b>/gi, '$1');
+  result = result.replace(/<strong[^>]*>(.*?)<\/strong>/gi, '$1');
+  result = result.replace(/<i[^>]*>(.*?)<\/i>/gi, '$1');
+  result = result.replace(/<em[^>]*>(.*?)<\/em>/gi, '$1');
+  
+  // Remove other tags
+  result = result.replace(/<[^>]*>/g, '');
+  
+  // Decode HTML entities
+  result = result.replace(/&amp;/g, '&');
+  result = result.replace(/&lt;/g, '<');
+  result = result.replace(/&gt;/g, '>');
+  result = result.replace(/&quot;/g, '"');
+  result = result.replace(/&#39;/g, "'");
+  
+  // Clean up multiple newlines
+  result = result.replace(/\n\s*\n/g, '\n\n');
+  
+  return result;
+};
+
 // Schema definitions for content items
 const ContentItemSchema = z.object({
     action: z.enum(['create', 'get', 'get_all', 'update', 'delete']).describe('The action to perform.'),
@@ -12,7 +69,7 @@ const ContentItemSchema = z.object({
     item_id: z.string().optional().describe('Item ID (required for get, update, delete actions).'),
     data: z.object({
         // Generic content properties - allow HTML content with looser validation
-        content: z.string().optional().describe('Text content. Supports HTML tags like p, h1-h6, a, etc.'),
+        content: z.string().optional().describe('Text content. For rich text, use Markdown-like formatting (e.g., **bold**, *italic*) or simple newlines. HTML tags will be automatically converted to plain text.'),
         // Shape-specific properties
         shape: z.enum(['square', 'rectangle', 'round_rectangle', 'circle', 'triangle', 'rhombus', 
                      'diamond',
@@ -94,7 +151,7 @@ type ContentItemParams = z.infer<typeof ContentItemSchema>;
 // Implementation of content item operations tool
 export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
     name: 'mcp_miro_content_item_operations',
-    description: 'Creates and manages text-based content on Miro boards including rich text, shapes with text, and sticky notes. Use this tool to: (1) create - add new text elements, shapes, or sticky notes with custom formatting, (2) get - retrieve a specific content item\'s details, (3) get_all - list all items of a specific type, (4) update - modify existing items\' content or appearance, (5) delete - remove items entirely. Text content supports HTML formatting for rich styling (headings, paragraphs, lists, bold/italic). Shapes come in 25+ variations (rectangles, circles, arrows, etc.) and can contain text. Sticky notes provide colorful annotation capabilities. All items can be customized with colors, fonts, borders, and precise positioning. Text elements are automatically converted to rectangle shapes to ensure proper sizing and positioning. Items can be placed anywhere on the board or within frames. Use this for adding explanatory text, callouts, labels, annotations, process steps, or any text-based information.',
+    description: 'Creates and manages text-based content on Miro boards including rich text, shapes with text, and sticky notes. Use this tool to: (1) create - add new text elements, shapes, or sticky notes with custom formatting, (2) get - retrieve a specific content item\'s details, (3) get_all - list all items of a specific type, (4) update - modify existing items\' content or appearance, (5) delete - remove items entirely. Text content should use simple text formatting with newlines for structure - HTML is not directly supported and will be converted to plain text. Shapes come in 25+ variations (rectangles, circles, arrows, etc.) and can contain text. Sticky notes only support specific named colors (like "yellow", "blue", "green"), not hex values. All items can be customized with fonts, borders, and precise positioning. Text elements are automatically converted to rectangle shapes to ensure proper sizing and positioning. Items can be placed anywhere on the board or within frames.',
     parameters: ContentItemSchema,
     execute: async (args) => {
         console.log(`Content Item Operation: ${JSON.stringify(args, null, 2)}`);
@@ -106,6 +163,17 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
         let queryParams: Record<string, string> = {};
         let body: Record<string, unknown> = {};
         let skipBodyConstruction = false;
+
+        // Preprocess any HTML content to plain text for Miro compatibility
+        if (data?.content && containsHtml(data.content)) {
+            console.log(`HTML content detected. Converting to plain text for Miro compatibility.`);
+            const originalContent = data.content;
+            data = { ...data, content: convertHtmlToPlainText(data.content) };
+            console.log(`Converted HTML content:
+              Original: "${originalContent.substring(0, 50)}${originalContent.length > 50 ? '...' : ''}"
+              Converted: "${data.content.substring(0, 50)}${data.content.length > 50 ? '...' : ''}"
+            `);
+        }
 
         // ALWAYS convert text to shape, regardless of action
         // This ensures we maintain control over sizing and positioning
@@ -373,7 +441,7 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
             const hasHtml = textContent.includes('<') && textContent.includes('>');
             const hasInlineStyles = textContent.includes('style=');
             console.log(`Content analysis:
-              - Contains HTML tags: ${hasHtml ? 'Yes' : 'No'}
+              - Contains HTML-like tags: ${hasHtml ? 'Yes' : 'No'}
               - Contains inline styles: ${hasInlineStyles ? 'Yes' : 'No'}
             `);
             
@@ -683,24 +751,108 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
                 if (typeof normalizedStyle.fillColor === 'string' && 
                     normalizedStyle.fillColor.startsWith('#')) {
                     // Map hex colors to nearest predefined color
-                    // For simplicity, we'll use a basic mapping for common colors
                     const hexToNameMap: Record<string, string> = {
                         '#ff0000': 'red',
+                        '#ff3333': 'red',
+                        '#ff6666': 'red',
+                        '#ff9999': 'light_pink',
+                        '#ffcccc': 'light_pink',
+                        '#ffaaaa': 'light_pink',
                         '#00ff00': 'green',
+                        '#33ff33': 'light_green',
+                        '#66ff66': 'light_green',
+                        '#99ff99': 'light_green',
                         '#0000ff': 'blue',
+                        '#3333ff': 'blue',
+                        '#6666ff': 'light_blue',
+                        '#9999ff': 'light_blue',
                         '#ffff00': 'yellow',
-                        '#ff9d48': 'orange', // Example mapping from your error
+                        '#ffff33': 'yellow',
+                        '#ffff66': 'light_yellow',
+                        '#ffff99': 'light_yellow',
+                        '#ff9900': 'orange',
+                        '#ff9933': 'orange',
+                        '#ff9966': 'orange',
+                        '#cc33ff': 'violet',
+                        '#9933ff': 'violet',
                         '#ffffff': 'gray',
+                        '#f8f8f8': 'gray',
+                        '#eeeeee': 'gray',
+                        '#dddddd': 'gray',
+                        '#cccccc': 'gray',
                         '#000000': 'black',
-                        '#0052CC': 'blue' // Additional mapping for the specific blue used in the test
+                        '#333333': 'black',
+                        '#666666': 'dark_blue',
+                        '#888888': 'gray',
+                        '#0052CC': 'blue',
+                        '#00CCCC': 'cyan'
                     };
                     
-                    stickyNoteStyle.fillColor = hexToNameMap[normalizedStyle.fillColor.toLowerCase()] || 'yellow';
-                } else if (typeof normalizedStyle.fillColor === 'string' && 
-                          validStickyNoteColors.includes(normalizedStyle.fillColor)) {
-                    stickyNoteStyle.fillColor = normalizedStyle.fillColor;
+                    // Try to map to a valid color name
+                    const lowerHex = normalizedStyle.fillColor.toLowerCase();
+                    if (hexToNameMap[lowerHex]) {
+                        stickyNoteStyle.fillColor = hexToNameMap[lowerHex];
+                        console.log(`Mapped hex color ${normalizedStyle.fillColor} to Miro sticky note color name '${stickyNoteStyle.fillColor}'`);
+                    } else {
+                        // If no exact match, use a default color
+                        stickyNoteStyle.fillColor = 'yellow';
+                        console.log(`No mapping found for hex color ${normalizedStyle.fillColor}, defaulting to 'yellow'`);
+                    }
+                } else if (typeof normalizedStyle.fillColor === 'string') {
+                    // Check if it's a valid sticky note color name
+                    const colorName = normalizedStyle.fillColor.toLowerCase();
+                    
+                    // Handle common color name conversions
+                    const colorNameMap: Record<string, string> = {
+                        'pink': 'pink',
+                        'lightpink': 'light_pink',
+                        'light-pink': 'light_pink',
+                        'light_pink': 'light_pink',
+                        'red': 'red',
+                        'green': 'green',
+                        'lightgreen': 'light_green',
+                        'light-green': 'light_green',
+                        'light_green': 'light_green',
+                        'darkgreen': 'dark_green',
+                        'dark-green': 'dark_green',
+                        'dark_green': 'dark_green',
+                        'blue': 'blue',
+                        'lightblue': 'light_blue',
+                        'light-blue': 'light_blue',
+                        'light_blue': 'light_blue',
+                        'darkblue': 'dark_blue',
+                        'dark-blue': 'dark_blue',
+                        'dark_blue': 'dark_blue',
+                        'yellow': 'yellow',
+                        'lightyellow': 'light_yellow',
+                        'light-yellow': 'light_yellow',
+                        'light_yellow': 'light_yellow',
+                        'orange': 'orange',
+                        'violet': 'violet',
+                        'purple': 'violet',
+                        'cyan': 'cyan',
+                        'aqua': 'cyan',
+                        'teal': 'cyan',
+                        'gray': 'gray',
+                        'grey': 'gray',
+                        'black': 'black'
+                    };
+                    
+                    const mappedColor = colorNameMap[colorName];
+                    
+                    if (mappedColor && validStickyNoteColors.includes(mappedColor)) {
+                        stickyNoteStyle.fillColor = mappedColor;
+                        console.log(`Mapped color name '${colorName}' to valid Miro sticky note color '${mappedColor}'`);
+                    } else if (validStickyNoteColors.includes(colorName)) {
+                        stickyNoteStyle.fillColor = colorName;
+                        console.log(`Using valid Miro sticky note color: '${colorName}'`);
+                    } else {
+                        // Default to yellow if color is invalid
+                        stickyNoteStyle.fillColor = 'yellow';
+                        console.log(`Invalid sticky note color name '${colorName}', defaulting to 'yellow'`);
+                    }
                 } else {
-                    // Default to yellow if color is invalid
+                    // Default to yellow for any other type
                     stickyNoteStyle.fillColor = 'yellow';
                 }
             }
@@ -714,7 +866,7 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
             
             // Use the sticky note specific style
             body.style = stickyNoteStyle;
-                    } else {
+        } else {
             // For other types, use the normalized style
             if (normalizedStyle) {
                 body.style = normalizedStyle;
@@ -849,15 +1001,23 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
             // Enhanced error handling
             if (error && typeof error === 'object' && 'response' in error) {
                 const axiosError = error as { response: { status: number; data: unknown } };
+                
                 // Handle specific error cases
                 if (axiosError.response.status === 404 && parent) {
                     return formatApiError(error, `Error: The parent frame with ID ${parent.id} does not exist or is not accessible.`);
                 } else if (axiosError.response.status === 400 && normalizedStyle && type === 'sticky_note') {
-                    return formatApiError(error, `Error: Invalid style properties for sticky note. Sticky notes only accept specific color names, not hex values.`);
+                    // More specific error for sticky note color issues
+                    return formatApiError(error, `Error: Invalid style properties for sticky note. Sticky notes only accept specific color names like 'yellow', 'blue', 'green', not hex values or unsupported color names.`);
+                } else if (axiosError.response.status === 400 && data?.content && containsHtml(data.content)) {
+                    // HTML formatting error
+                    return formatApiError(error, `Error: HTML formatting in content caused validation issues. Try using plain text with line breaks instead of HTML tags. HTML content has been converted but may need manual adjustment.`);
                 } else if (axiosError.response.status === 400 && normalizedStyle) {
-                    // Log more details about what might be wrong
+                    // Log more details about what might be wrong with style
                     console.error(`Style properties that might be causing issues: ${JSON.stringify(normalizedStyle)}`);
-                    return formatApiError(error, `Error: Invalid style properties for ${type}. Check colors, border values, and other style settings.`);
+                    return formatApiError(error, `Error: Invalid style properties for ${type}. Check colors (must be hex format like #FF0000), border values, and other style settings.`);
+                } else if (axiosError.response.status === 400 && parent) {
+                    // Position outside parent boundaries
+                    return formatApiError(error, `Error: Position is outside parent frame boundaries. When placing items in a frame, ensure coordinates are within the frame's dimensions or use 'parent_top_left' as the relativeTo reference.`);
                 }
             }
             return formatApiError(error);
