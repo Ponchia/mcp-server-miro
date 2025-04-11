@@ -47,7 +47,7 @@ const ContentItemSchema = z.object({
     item_id: z.string().optional().describe('Item ID (required for get, update, delete actions).'),
     data: z.object({
         // Generic content properties
-        content: z.string().optional().describe('Text content. Miro text elements support these HTML tags: <p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>. For other formatting, use separate text elements with different styles.'),
+        content: z.string().optional().describe('Text content. Miro text elements support these HTML tags: <p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>. Example: "<p>This is a <strong>bold</strong> statement.</p>"'),
         // Shape-specific properties
         shape: z.enum(['square', 'rectangle', 'round_rectangle', 'circle', 'triangle', 'rhombus', 
                      'diamond',
@@ -59,10 +59,10 @@ const ContentItemSchema = z.object({
                      'parallelogram', 'trapezoid', 'pentagon', 'hexagon', 'octagon', 
                      'wedge_round_rectangle_callout', 'star', 'flow_chart_predefined_process', 
                      'cloud', 'cross', 'can', 'right_arrow', 'left_arrow', 'left_right_arrow', 
-                     'left_brace', 'right_brace']).optional().describe('Shape type (for shapes and sticky notes).'),
+                     'left_brace', 'right_brace']).optional().describe('Shape type (for shapes only).'),
     }).optional().describe('Content data based on type.'),
     style: z.object({
-        // Generic style properties - allow all for text since we'll convert to shape
+        // Generic style properties
         fillColor: z.union([
             z.string().regex(/^#[0-9a-fA-F]{6}$/),
             z.string().regex(/^#[0-9a-fA-F]{3}$/),
@@ -70,52 +70,52 @@ const ContentItemSchema = z.object({
             z.enum(['gray', 'light_yellow', 'yellow', 'orange', 'light_green', 'green', 
                   'dark_green', 'cyan', 'light_pink', 'pink', 'violet', 'red', 'light_blue', 
                   'blue', 'dark_blue', 'black', 'white', 'transparent'])
-        ]).optional().describe('Background color. Accepts hex colors (with or without #), named colors, or "transparent".'),
-        fillOpacity: z.number().min(0).max(1).optional().describe('Background opacity (0.0-1.0).'),
-        color: z.string().optional().describe('Text color. Accepts hex colors (with or without #) or color names.'),
+        ]).optional().describe('Background color. Examples: "#FF0000" (red), "#00FF00" (green), "blue", "transparent" (default for text).'),
+        fillOpacity: z.number().min(0).max(1).optional().describe('Background opacity from 0.0 (transparent) to 1.0 (solid). Example: 0.5 for semi-transparent.'),
+        color: z.string().optional().describe('Text color. Examples: "#000000" (black), "#FF0000" (red), "blue". Default: "#1a1a1a" (dark gray).'),
         fontFamily: z.enum(['arial', 'abril_fatface', 'bangers', 'eb_garamond', 'georgia', 'graduate', 
                           'gravitas_one', 'fredoka_one', 'nixie_one', 'open_sans', 'permanent_marker', 
                           'pt_sans', 'pt_sans_narrow', 'pt_serif', 'rammetto_one', 'roboto', 
                           'roboto_condensed', 'roboto_slab', 'caveat', 'times_new_roman', 'titan_one', 
                           'lemon_tuesday', 'roboto_mono', 'noto_sans', 'plex_sans', 'plex_serif', 
-                          'plex_mono', 'spoof', 'tiempos_text', 'formular']).optional().describe('Font family.'),
-        fontSize: z.union([z.string(), z.number()]).optional().describe('Font size in dp.'),
-        textAlign: z.enum(['left', 'right', 'center']).optional().describe('Horizontal text alignment.'),
-        textAlignVertical: z.enum(['top', 'middle', 'bottom']).optional().describe('Vertical text alignment.'),
-        // Shape-specific style - also allowed for text since we'll convert to shape
-        borderColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().describe('Border color.'),
+                          'plex_mono', 'spoof', 'tiempos_text', 'formular']).optional().describe('Font family. Examples: "arial", "roboto", "times_new_roman". Default: "arial".'),
+        fontSize: z.union([z.string(), z.number()]).optional().describe('Font size in dp. Examples: 14, "24". Default: 14.'),
+        textAlign: z.enum(['left', 'right', 'center']).optional().describe('Horizontal text alignment. Default: "left".'),
+        textAlignVertical: z.enum(['top', 'middle', 'bottom']).optional().describe('Vertical text alignment. Default: "middle".'),
+        // Shape-specific style properties
+        borderColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().describe('Border color for shapes. Must be a hex color. Example: "#000000" for black border.'),
         borderOpacity: z.union([
             z.string().refine(val => {
                 const num = parseFloat(val);
                 return !isNaN(num) && num >= 0 && num <= 1;
             }, { message: "String opacity must convert to a number between 0 and 1" }),
             z.number().min(0).max(1)
-        ]).optional().describe('Border opacity (0.0-1.0).'),
-        borderStyle: z.enum(['normal', 'dotted', 'dashed']).optional().describe('Border style.'),
+        ]).optional().describe('Border opacity from 0.0 (transparent) to 1.0 (solid). Example: 0.5 for semi-transparent.'),
+        borderStyle: z.enum(['normal', 'dotted', 'dashed']).optional().describe('Border style for shapes. Default: "normal".'),
         borderWidth: z.union([
             z.string().refine(val => {
                 const num = parseFloat(val);
                 return !isNaN(num) && num >= 0 && num <= 24;
             }, { message: "String border width must convert to a number between 0 and 24" }),
             z.number().min(0).max(24)
-        ]).optional().describe('Border width.'),
+        ]).optional().describe('Border width in dp (0-24). Example: 2 for a thin border. Default: 1.'),
         // Accept additional style properties that might not be directly supported by Miro
         fontWeight: z.string().optional().describe('Font weight (not directly supported by Miro API).'),
         // Also allow "content" in style since shapes need it there
-        content: z.string().optional().describe('Text content for shapes.'),
-    }).optional().describe('Styling options.'),
+        content: z.string().optional().describe('Alternative location for text content (for shapes).'),
+    }).optional().describe('Styling options. Use appropriate properties for each item type. Text items support color, fontFamily, fontSize, textAlign. Shapes support all style properties. Sticky notes only support specific named colors (not hex).'),
     position: z.object({
-        x: z.number().describe('X-axis coordinate.'),
-        y: z.number().describe('Y-axis coordinate.'),
-        origin: z.enum(['center']).optional().describe('Origin point for coordinates.'),
-        relativeTo: z.enum(['canvas_center', 'parent_top_left']).optional().describe('Coordinate system reference.')
-    }).optional().describe('Position on the board.'),
+        x: z.number().describe('X-axis coordinate in dp. Example: 0 for center of board.'),
+        y: z.number().describe('Y-axis coordinate in dp. Example: 0 for center of board.'),
+        origin: z.enum(['center']).optional().describe('Origin point for coordinates. Default: "center".'),
+        relativeTo: z.enum(['canvas_center', 'parent_top_left']).optional().describe('Coordinate system reference. Default: "canvas_center".')
+    }).optional().describe('Position on the board. If omitted, item will be placed at center of the board.'),
     geometry: z.object({
-        width: z.number().optional().describe('Width in pixels.'),
-        height: z.number().optional().describe('Height in pixels.'),
-        rotation: z.number().optional().describe('Rotation angle in degrees.'),
-    }).optional().describe('Dimensions and rotation.'),
-    parent: z.object({ id: z.string() }).optional().describe('Parent frame ID.')
+        width: z.number().optional().describe('Width in dp. Example: 200. Default for text: 105.'),
+        height: z.number().optional().describe('Height in dp. Example: 100. For text items, height is calculated automatically.'),
+        rotation: z.number().optional().describe('Rotation angle in degrees. Example: 45 for a 45-degree rotation. Default: 0.'),
+    }).optional().describe('Dimensions and rotation. If omitted, default sizing is applied.'),
+    parent: z.object({ id: z.string() }).optional().describe('Parent frame ID to place this item inside a frame.')
 }).refine(
     data => !(['get', 'update', 'delete'].includes(data.action)) || data.item_id, 
     { message: 'item_id is required for get, update, and delete actions', path: ['item_id'] }
@@ -129,7 +129,30 @@ type ContentItemParams = z.infer<typeof ContentItemSchema>;
 // Implementation of content item operations tool
 export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
     name: 'mcp_miro_content_item_operations',
-    description: 'Creates and manages content on Miro boards including text, shapes with text, and sticky notes. Use this tool to: (1) create - add new text elements, shapes, or sticky notes with custom formatting, (2) get - retrieve a specific content item\'s details, (3) get_all - list all items of a specific type, (4) update - modify existing items\' content or appearance, (5) delete - remove items entirely. Text items in Miro support basic HTML formatting with these tags: <p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>. Shapes include 25+ variations (rectangles, circles, arrows, etc.) and can contain text. Sticky notes only support specific named colors (like "yellow", "blue", "green"), not hex values. All items can be positioned precisely on the board or within frames.',
+    description: `Creates and manages content on Miro boards including text, shapes with text, and sticky notes.
+
+ACTIONS:
+(1) CREATE - Add new items with specified properties:
+   - Text: Supports basic HTML formatting (<p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>)
+   - Shapes: 25+ types (rectangle, circle, arrow, etc.) with customizable borders, fill colors
+   - Sticky notes: Simple colored notes (limited to named colors like "yellow", "blue", "green")
+
+(2) GET - Retrieve a specific item's details
+(3) GET_ALL - List all items of a specific type
+(4) UPDATE - Modify existing items' content or appearance
+(5) DELETE - Remove items entirely
+
+STYLING EXAMPLES:
+- Text: {color: "#FF0000", fontFamily: "roboto", fontSize: 18, textAlign: "center"}
+- Shape: {fillColor: "#E6F9FF", fillOpacity: 0.5, borderColor: "#0000FF", borderWidth: 2}
+- Sticky note: {fillColor: "yellow"} (only accepts named colors, not hex values)
+
+POSITIONING: 
+- All items can be precisely positioned with x/y coordinates
+- Default position is the center of the board if not specified
+- Can be placed inside frames using the parent parameter
+
+For all items, omitted parameters will use reasonable defaults. For sticky notes, only specific named colors are supported, not hex values.`,
     parameters: ContentItemSchema,
     execute: async (args) => {
         console.log(`Content Item Operation: ${JSON.stringify(args, null, 2)}`);
@@ -308,17 +331,49 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
                     textStyle.textAlign = style.textAlign;
                 }
                 
+                // Fill properties (background)
+                if (style.fillColor) {
+                    textStyle.fillColor = normalizeColor(style.fillColor);
+                }
+                
+                if (typeof style.fillOpacity !== 'undefined') {
+                    textStyle.fillOpacity = style.fillOpacity;
+                }
+                
                 // For native text elements in Miro, we don't need border properties
                 // as they're not supported for text elements
                 
                 // Apply the normalized style
                 body.style = textStyle;
+            } else {
+                // Set reasonable defaults for text if no style is provided
+                body.style = {
+                    color: '#1a1a1a',
+                    fontFamily: 'arial',
+                    fontSize: '14',
+                    textAlign: 'left',
+                    fillColor: 'transparent'
+                };
             }
-                            } else {
+        } else {
             // For non-text elements (shapes, sticky notes), use the original normalization
             const normalizedStyle = normalizeStyleValues(style);
             if (normalizedStyle) {
                 body.style = normalizedStyle;
+            } else if (type === 'sticky_note') {
+                // Set default for sticky notes if no style is provided
+                body.style = {
+                    fillColor: 'yellow'
+                };
+            } else if (type === 'shape') {
+                // Set reasonable defaults for shapes if no style is provided
+                body.style = {
+                    fillColor: '#ffffff',
+                    fillOpacity: 1,
+                    borderColor: '#1a1a1a',
+                    borderWidth: 1,
+                    borderStyle: 'normal'
+                };
             }
             
         // Map common shape names to Miro API shape names if needed
@@ -398,9 +453,11 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
                     const lowerHex = normalizedStyle.fillColor.toLowerCase();
                     if (hexToNameMap[lowerHex]) {
                         stickyNoteStyle.fillColor = hexToNameMap[lowerHex];
+                        console.log(`Converted hex color ${lowerHex} to Miro sticky note color ${hexToNameMap[lowerHex]}`);
                     } else {
                         // If no exact match, use a default color
                         stickyNoteStyle.fillColor = 'yellow';
+                        console.log(`Cannot map hex color ${lowerHex} to a Miro sticky note color. Using default 'yellow'.`);
                     }
                 } else if (typeof normalizedStyle.fillColor === 'string') {
                     // Check if it's a valid sticky note color name
@@ -451,11 +508,16 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
                     } else {
                         // Default to yellow if color is invalid
                         stickyNoteStyle.fillColor = 'yellow';
+                        console.log(`Color name '${colorName}' is not a valid Miro sticky note color. Using default 'yellow'.`);
+                        console.log(`Valid sticky note colors are: ${validStickyNoteColors.join(', ')}`);
                     }
                 } else {
                     // Default to yellow for any other type
                     stickyNoteStyle.fillColor = 'yellow';
                 }
+            } else {
+                // If no fillColor is specified, default to yellow
+                stickyNoteStyle.fillColor = 'yellow';
             }
             
             // Copy other valid properties
@@ -474,8 +536,15 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
         const normalizedGeometry = normalizeGeometryValues(geometry);
         const normalizedPosition = normalizePositionValues(args.position);
         
+        // Set default width for text if not provided
+        if (type === 'text' && (!normalizedGeometry || !normalizedGeometry.width)) {
+            body.geometry = { 
+                ...normalizedGeometry,
+                width: 105 // Default text width
+            };
+        }
         // Handle geometry constraints for sticky notes
-        if (type === 'sticky_note' && normalizedGeometry) {
+        else if (type === 'sticky_note' && normalizedGeometry) {
             // For sticky notes, only include one dimension (width or height)
             if (normalizedGeometry.width && normalizedGeometry.height) {
                 const { width } = normalizedGeometry;
@@ -485,16 +554,29 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
             }
         } else if (normalizedGeometry) {
             body.geometry = normalizedGeometry;
+        } else if (type === 'shape') {
+            // Set default geometry for shapes if not provided
+            body.geometry = {
+                width: 100,
+                height: 100
+            };
         }
         
-        // Add position if provided
+        // Add position if provided, otherwise use center of board
         if (normalizedPosition) {
             body.position = normalizedPosition;
+        } else {
+            body.position = {
+                x: 0,
+                y: 0,
+                origin: 'center',
+                relativeTo: 'canvas_center'
+            };
         }
         
         // Add data if provided
         if (data) {
-                body.data = data;
+            body.data = data;
         }
         
         // Add parent if provided
@@ -578,14 +660,18 @@ export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
                     return formatApiError(error, `Error: The parent frame with ID ${parent.id} does not exist or is not accessible.`);
                 } else if (axiosError.response.status === 400 && style && type === 'sticky_note') {
                     // More specific error for sticky note color issues
-                    return formatApiError(error, `Error: Invalid style properties for sticky note. Sticky notes only accept specific color names like 'yellow', 'blue', 'green', not hex values or unsupported color names.`);
+                    const validColors = ['gray', 'light_yellow', 'yellow', 'orange', 'light_green', 'green', 'dark_green', 'cyan', 'light_pink', 'pink', 'violet', 'red', 'light_blue', 'blue', 'dark_blue', 'black'];
+                    return formatApiError(error, `Error: Invalid style properties for sticky note. Sticky notes only accept specific named colors: ${validColors.join(', ')}. Hex color values are not supported for sticky notes.`);
                 } else if (axiosError.response.status === 400 && data?.content && containsHtml(data.content)) {
                     // Updated error message for HTML formatting issues
-                    return formatApiError(error, `Error: HTML formatting validation failed. Miro only supports these HTML tags: <p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>. Other tags will be escaped.`);
+                    return formatApiError(error, `Error: HTML formatting validation failed. Miro only supports these HTML tags: <p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>. Other HTML tags will be escaped as plain text.`);
+                } else if (axiosError.response.status === 400 && style && style.color) {
+                    // Specific error for color format issues
+                    return formatApiError(error, `Error: Invalid color format. Colors must be valid hex values (e.g., "#FF0000" for red) or named colors. Make sure to include the # prefix for hex colors.`);
                 } else if (axiosError.response.status === 400 && style) {
                     // Log more details about what might be wrong with style
                     console.error(`Style properties that might be causing issues: ${JSON.stringify(style)}`);
-                    return formatApiError(error, `Error: Invalid style properties for ${type}. Check colors (must be hex format like #FF0000), border values, and other style settings.`);
+                    return formatApiError(error, `Error: Invalid style properties for ${type}. For colors, use hex format like "#FF0000" or valid color names. For text, use properties like color, fontFamily, fontSize, textAlign. For shapes, you can also use borderColor, borderWidth, fillColor, fillOpacity.`);
                 } else if (axiosError.response.status === 400 && parent) {
                     // Position outside parent boundaries
                     return formatApiError(error, `Error: Position is outside parent frame boundaries. When placing items in a frame, ensure coordinates are within the frame's dimensions or use 'parent_top_left' as the relativeTo reference.`);
