@@ -19,7 +19,7 @@ import {
 } from './tools/state-tools';
 import { 
     checkForSimilarContentTool,
-    unifiedSearchTool as searchTool
+    searchTool
 } from './tools/search-tools';
 
 // Create the server with enhanced error handling
