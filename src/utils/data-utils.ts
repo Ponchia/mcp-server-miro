@@ -59,42 +59,81 @@ export function normalizeGeometryValues(geometry: Record<string, unknown> | unde
 export function normalizePositionValues(position: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
     if (!position) return undefined;
     
-    const normalizedPosition = {...position};
+    // Create a working copy for our transformations
+    const workingPosition = {...position};
     
     // Process percentage values if they exist
-    const hasPercentageX = typeof normalizedPosition.x === 'string' && 
-                          normalizedPosition.x.toString().endsWith('%');
-    const hasPercentageY = typeof normalizedPosition.y === 'string' && 
-                          normalizedPosition.y.toString().endsWith('%');
+    const hasPercentageX = typeof workingPosition.x === 'string' && 
+                          workingPosition.x.toString().endsWith('%');
+    const hasPercentageY = typeof workingPosition.y === 'string' && 
+                          workingPosition.y.toString().endsWith('%');
     
-    // Handle percentage conversions - store original values for our later use
+    // Preserve original values and reference system for later use
+    const originalX = workingPosition.x;
+    const originalY = workingPosition.y;
+    
+    // Get the reference system - crucial for coordinate translation
+    let referenceSystem = 'canvas_center'; // Default
+    if ('relativeTo' in workingPosition) {
+        referenceSystem = workingPosition.relativeTo as string;
+        // Store but don't send to API
+        delete workingPosition.relativeTo;
+        
+        // Always ensure origin is 'center' when using parent_center reference
+        if (referenceSystem === 'parent_center' && (!workingPosition.origin || workingPosition.origin !== 'center')) {
+            console.warn(`WARNING: When using relativeTo: "parent_center", origin MUST be "center" to work correctly`);
+            console.warn(`Auto-fixing missing/incorrect origin value for parent_center reference`);
+            console.warn(`To avoid this warning, always include "origin": "center" when using "relativeTo": "parent_center"`);
+            workingPosition.origin = 'center';
+        }
+    } else if (hasPercentageX || hasPercentageY) {
+        // If using percentages without explicit relativeTo, use parent_percentage
+        referenceSystem = 'parent_percentage';
+    }
+    
+    // Handle percentage conversions
     if (hasPercentageX || hasPercentageY) {
         // Store original percentage values
-        normalizedPosition.__originalX = normalizedPosition.x;
-        normalizedPosition.__originalY = normalizedPosition.y;
+        if (hasPercentageX) {
+            const percentX = parseFloat(workingPosition.x as string);
+            workingPosition.x = percentX;
+        }
         
-        // If using percentages, default relativeTo to parent_percentage
-        if (!('relativeTo' in normalizedPosition)) {
-            normalizedPosition.__relativeTo = 'parent_percentage';
+        if (hasPercentageY) {
+            const percentY = parseFloat(workingPosition.y as string);
+            workingPosition.y = percentY;
         }
     }
     
-    // Convert x and y to numbers if they're strings (excluding percentage values)
-    if (typeof normalizedPosition.x === 'string' && !hasPercentageX) {
-        normalizedPosition.x = parseFloat(normalizedPosition.x as string);
+    // Convert other string values to numbers
+    if (typeof workingPosition.x === 'string' && !hasPercentageX) {
+        workingPosition.x = parseFloat(workingPosition.x as string);
     }
     
-    if (typeof normalizedPosition.y === 'string' && !hasPercentageY) {
-        normalizedPosition.y = parseFloat(normalizedPosition.y as string);
+    if (typeof workingPosition.y === 'string' && !hasPercentageY) {
+        workingPosition.y = parseFloat(workingPosition.y as string);
     }
     
-    // Store relativeTo for our internal use but remove from API call
-    if ('relativeTo' in normalizedPosition) {
-        normalizedPosition.__relativeTo = normalizedPosition.relativeTo;
-        delete normalizedPosition.relativeTo;
-    }
+    // Create API-ready position object with only the properties Miro API supports
+    const apiReadyPosition: Record<string, unknown> = {
+        // Store position values
+        x: workingPosition.x,
+        y: workingPosition.y,
+        
+        // Store origin or use default
+        origin: workingPosition.origin || 'center',
+        
+        // Store crucial metadata for coordinate translation (won't be sent to API)
+        __refSystem: referenceSystem,
+        __isPercentageX: hasPercentageX,
+        __isPercentageY: hasPercentageY,
+        __originalX: originalX,
+        __originalY: originalY
+    };
     
-    return normalizedPosition;
+    console.log(`Position normalized from "${referenceSystem}" reference system: ${JSON.stringify(apiReadyPosition)}`);
+    
+    return apiReadyPosition;
 }
 
 /**
@@ -186,6 +225,11 @@ export function translatePosition(
             // Convert from canvas center to parent's center
             resultX = x - parentPosition!.x;
             resultY = y - parentPosition!.y;
+            // Ensure origin is set to center for parent_center
+            if (Object.prototype.hasOwnProperty.call(coords, 'origin')) {
+                const coordsWithOrigin = coords as {origin?: string};
+                coordsWithOrigin.origin = 'center';
+            }
             break;
             
         case 'parent_bottom_right':
@@ -217,8 +261,10 @@ export function validateChildPosition(
 ): { valid: boolean; message?: string } {
     if (!position || !parentGeometry) return { valid: true };
     
-    // Extract reference system
-    const referenceSystem = relativeTo || position.__relativeTo || 'parent_top_left';
+    // Extract reference system, prioritizing the explicit parameter
+    const referenceSystem = relativeTo || 
+                          (position.__relativeTo ? String(position.__relativeTo) : 
+                           (position.relativeTo ? String(position.relativeTo) : 'parent_top_left'));
     
     // Handle percentage values
     if (referenceSystem === 'parent_percentage') {

@@ -4,7 +4,47 @@ import { formatApiResponse, formatApiError } from '../utils/api-utils';
 import { normalizeStyleValues, normalizeGeometryValues, normalizePositionValues, modificationHistory } from '../utils/data-utils';
 import { ToolDefinition } from '../types/tool-types';
 import { miroBoardId } from '../config';
-import { MCP_POSITIONING_GUIDE } from '../schemas/position-schema';
+
+// Define a simplified positioning guide that's easier for LLMs to understand and use
+export const SIMPLIFIED_POSITIONING_GUIDE = `
+SIMPLIFIED POSITIONING GUIDE FOR ITEMS IN FRAMES:
+
+1. CENTER OF FRAME (recommended for most cases):
+   "position": {
+     "x": 0,
+     "y": 0,
+     "relativeTo": "parent_center",
+     "origin": "center"  <-- REQUIRED! Always include this with parent_center
+   }
+
+2. TOP-LEFT CORNER OF FRAME:
+   "position": {
+     "x": 10,  <-- Always use POSITIVE values
+     "y": 10,  <-- Always use POSITIVE values
+     "relativeTo": "parent_top_left"
+   }
+
+3. EXACT POSITION IN FRAME:
+   "position": {
+     "x": 50,
+     "y": 50,
+     "relativeTo": "parent_top_left"
+   }
+
+4. CENTER WITH OFFSET:
+   "position": {
+     "x": 20,  <-- Positive moves right from center
+     "y": -30, <-- Negative moves up from center
+     "relativeTo": "parent_center",
+     "origin": "center"  <-- REQUIRED! Always include this with parent_center
+   }
+
+BEST PRACTICES:
+- When using "relativeTo": "parent_center" you MUST include "origin": "center"
+- When using "relativeTo": "parent_top_left" use positive coordinates only
+- Position {x:0, y:0} with parent_center puts item at exact center of frame
+- Position {x:0, y:0} with parent_top_left puts item at top-left corner of frame
+`;
 
 // HTML processing functions
 /**
@@ -349,7 +389,41 @@ ACTIONS:
 (4) UPDATE - Modify existing items' content or appearance
 (5) DELETE - Remove items entirely
 
-${MCP_POSITIONING_GUIDE}
+POSITIONING IN FRAMES (SIMPLIFIED):
+• When placing items inside frames, use one of these approaches:
+
+1. CENTER OF FRAME (easiest & recommended):
+   "position": {
+     "x": 0,
+     "y": 0,
+     "relativeTo": "parent_center",
+     "origin": "center"
+   }
+
+2. TOP-LEFT CORNER OF FRAME:
+   "position": {
+     "x": 10,
+     "y": 10,
+     "relativeTo": "parent_top_left"
+   }
+
+3. SPECIFIC LOCATION FROM TOP-LEFT:
+   "position": {
+     "x": 100,  // 100px from left edge
+     "y": 50,   // 50px from top edge
+     "relativeTo": "parent_top_left"
+   }
+
+4. CENTER WITH OFFSET:
+   "position": {
+     "x": 50,   // 50px right of center
+     "y": -30,  // 30px above center
+     "relativeTo": "parent_center",
+     "origin": "center"
+   }
+
+• Always use positive coordinates with parent_top_left
+• Always include "origin": "center" when using parent_center
 
 FRAMES AND ORGANIZATION:`,
     parameters: ContentItemSchema,
@@ -463,13 +537,15 @@ Position guide for items in frames:
                         console.warn(`Frames use "title" (not "content") and do not support HTML formatting.`);
                         console.warn(`Converting HTML to plain text for frame title.`);
                         
-                        // Strip HTML and convert to plain text for frame title
-                        const plainText = stripHtmlTags(data.content);
+                        // Strip HTML and convert to plain text for frame title - handle undefined
+                        const content = data && data.content ? data.content : '';
+                        const plainText = stripHtmlTags(content);
                         
-                        // Set as title instead of content
-                        data = {
-                            title: plainText
-                        };
+                        // Create a new object for frame data with the correct structure
+                        const frameData: Record<string, string> = { title: plainText };
+                        
+                        // Replace data with the frame-specific data structure
+                        data = frameData as typeof data;
                         
                         console.log(`Converted HTML to plain text title: "${plainText}"`);
                     }
@@ -1247,7 +1323,101 @@ Position guide for items in frames:
 
         // Normalize geometry and position
         const normalizedGeometry = normalizeGeometryValues(geometry);
-        const normalizedPosition = normalizePositionValues(args.position);
+        let normalizedPosition = normalizePositionValues(args.position);
+        
+        // Enhanced positioning logic for parent frames
+        if (normalizedPosition && parent?.id) {
+            // Simple helper function to ensure consistent positioning inside frames
+            const ensureValidParentPosition = (position: Record<string, unknown>) => {
+                // If using parent_center, ensure origin is center (required)
+                if (position.__refSystem === 'parent_center' || position.relativeTo === 'parent_center') {
+                    if (position.origin !== 'center') {
+                        console.log('Auto-correcting: Setting origin to "center" for parent_center reference (required)');
+                        position.origin = 'center';
+                    }
+                }
+                
+                // If using parent_top_left, ensure coordinates are positive
+                if (position.__refSystem === 'parent_top_left' || position.relativeTo === 'parent_top_left') {
+                    const x = position.x as number;
+                    const y = position.y as number;
+                    
+                    if (x < 0 || y < 0) {
+                        console.log(`Auto-correcting: Converting negative coordinates (${x},${y}) to positive for parent_top_left`);
+                        position.x = Math.max(0, x);
+                        position.y = Math.max(0, y);
+                    }
+                }
+                
+                return position;
+            };
+            
+            // Apply the helper
+            normalizedPosition = ensureValidParentPosition(normalizedPosition as Record<string, unknown>);
+            
+            try {
+                // First, get the parent frame dimensions
+                const frameCheckUrl = `/v2/boards/${miroBoardId}/frames/${parent.id}`;
+                const frameResponse = await miroClient.get(frameCheckUrl);
+                const frameData = frameResponse.data;
+                
+                if (frameData && frameData.geometry) {
+                    // Get the reference system that was being used (stored during normalization)
+                    const refSystem = normalizedPosition.__refSystem as string || 'parent_top_left';
+                    
+                    // Get parent dimensions
+                    const parentWidth = frameData.geometry.width || 0;
+                    const parentHeight = frameData.geometry.height || 0;
+                    
+                    console.log(`Translating coordinates from ${refSystem} to parent_top_left (API format)`);
+                    console.log(`Parent dimensions: ${parentWidth}x${parentHeight}`);
+                    
+                    // Original coordinates
+                    const x = normalizedPosition.x as number;
+                    const y = normalizedPosition.y as number;
+                    
+                    // Set consistent origin for all parent-relative positioning
+                    if (refSystem === 'parent_center') {
+                        // When using parent_center, always enforce origin: 'center'
+                        normalizedPosition.origin = 'center';
+                        // For parent_center, we don't need to translate coordinates - let the API handle it
+                        console.log(`Using parent_center with origin: center - no coordinate translation needed`);
+                    } 
+                    else if (refSystem === 'parent_top_left') {
+                        // For parent_top_left, ensure positive coordinates
+                        normalizedPosition.x = Math.max(0, x);
+                        normalizedPosition.y = Math.max(0, y);
+                        console.log(`Using parent_top_left - ensuring positive coordinates: (${normalizedPosition.x},${normalizedPosition.y})`);
+                    }
+                    else if (refSystem === 'parent_bottom_right') {
+                        // Convert from parent bottom-right to parent top-left
+                        normalizedPosition.x = parentWidth - x;
+                        normalizedPosition.y = parentHeight - y;
+                        normalizedPosition.relativeTo = 'parent_top_left';
+                        console.log(`Translated from parent_bottom_right: (${x},${y}) -> (${normalizedPosition.x},${normalizedPosition.y})`);
+                    } 
+                    else if (refSystem === 'parent_percentage') {
+                        // Convert from percentage to absolute values based on parent dimensions
+                        normalizedPosition.x = (x / 100) * parentWidth;
+                        normalizedPosition.y = (y / 100) * parentHeight;
+                        normalizedPosition.relativeTo = 'parent_top_left';
+                        console.log(`Translated from parent_percentage: (${x}%,${y}%) -> (${normalizedPosition.x},${normalizedPosition.y})`);
+                    }
+                    
+                    // Remove all internal tracking properties before API call
+                    delete normalizedPosition.__refSystem;
+                    delete normalizedPosition.__isPercentageX;
+                    delete normalizedPosition.__isPercentageY;
+                    delete normalizedPosition.__originalX;
+                    delete normalizedPosition.__originalY;
+                    
+                    // parent_top_left is already in the format Miro expects, no translation needed
+                }
+            } catch (error) {
+                console.error(`Error translating parent-relative coordinates: ${error}`);
+                // Continue with the untranslated coordinates
+            }
+        }
         
         // Set default width for text if not provided
         if (type === 'text' && (!normalizedGeometry || !normalizedGeometry.width)) {
@@ -1290,18 +1460,46 @@ Position guide for items in frames:
             };
         }
         
-        // Add position if provided, otherwise use center of board
-        if (normalizedPosition) {
-            body.position = normalizedPosition;
-        } else {
-            body.position = {
-                x: 0,
-                y: 0,
-                origin: 'center',
-                relativeTo: 'canvas_center'
+        // Special handling for sticky notes - they need extra care with positioning
+        if (type === 'sticky_note' && parent?.id && normalizedPosition) {
+            // Log special sticky note positioning details
+            console.log(`Special handling for sticky note in frame ${parent.id}`);
+            
+            // We need to ensure all metadata properties are removed before sending to API
+            const cleanedPosition: Record<string, unknown> = {
+                x: normalizedPosition.x,
+                y: normalizedPosition.y,
+                origin: normalizedPosition.origin || 'center'
             };
+            
+            // Replace the normalized position with a clean version
+            body.position = cleanedPosition;
+        } else {
+            // For other item types, use the normalized position
+            if (normalizedPosition) {
+                body.position = normalizedPosition;
+            } else {
+                // Default position at center of board if none provided
+                body.position = {
+                    x: 0,
+                    y: 0,
+                    origin: 'center'
+                };
+            }
         }
         
+        // Clean up any remaining metadata on positions to prevent API errors
+        // Remove all internal tracking properties before final API call
+        if (body.position && typeof body.position === 'object') {
+            const position = body.position as Record<string, unknown>;
+            const cleanedPosition: Record<string, unknown> = {
+                x: position.x,
+                y: position.y,
+                origin: position.origin || 'center'
+            };
+            body.position = cleanedPosition;
+        }
+
         // Add data if provided
         if (data) {
             body.data = data;
@@ -1318,6 +1516,14 @@ Position guide for items in frames:
                 // Position validation for parent frames
                 if (parent && body.position) {
                     const position = body.position as Record<string, unknown>;
+                    
+                    // Add warning for parent_center without explicit origin
+                    if (position.relativeTo === 'parent_center' && position.origin !== 'center') {
+                        console.warn(`Warning: When using relativeTo: "parent_center" with a parent frame, "origin": "center" is required`);
+                        console.warn(`Auto-fixing by setting origin: "center" to ensure proper positioning`);
+                        position.origin = 'center';
+                    }
+                    
                     if (position.relativeTo === 'parent_top_left') {
                         // Ensure position values are positive when using parent_top_left
                         const xPos = typeof position.x === 'number' ? position.x : 0;
@@ -1492,7 +1698,12 @@ When placing items in a frame:
 1. Use "relativeTo": "parent_top_left" in the position object
 2. Use positive coordinates (x and y should be >= 0)
 3. Coordinates should be within the frame's dimensions
-4. Example: {"x": 10, "y": 10, "relativeTo": "parent_top_left"}`);
+4. Example: {"x": 10, "y": 10, "relativeTo": "parent_top_left"}
+
+ALTERNATIVE APPROACH: 
+For easier positioning, use:
+{"x": 0, "y": 0, "relativeTo": "parent_center", "origin": "center"}
+This places the item at the center of the frame. Always include "origin": "center" when using parent_center.`);
                 } else if (axiosError.response.status === 413) {
                     // Content too large error
                     return formatApiError(error, `Error: Content is too large. Miro text elements have a limit of 6,000 characters.`);
