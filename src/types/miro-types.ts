@@ -3,8 +3,10 @@ export interface MiroItem {
     id: string;
     type: string;
     position?: {
-        x: number;
-        y: number;
+        x: number | string;  // Can be number or percentage string (e.g., "50%")
+        y: number | string;  // Can be number or percentage string (e.g., "50%")
+        origin?: 'center';
+        relativeTo?: 'canvas_center' | 'parent_top_left' | 'parent_center' | 'parent_bottom_right' | 'parent_percentage';
         [key: string]: unknown;
     };
     geometry?: {

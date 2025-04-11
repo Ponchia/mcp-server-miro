@@ -4,6 +4,7 @@ import { formatApiResponse, formatApiError } from '../utils/api-utils';
 import { normalizeStyleValues, normalizeGeometryValues, normalizePositionValues, modificationHistory } from '../utils/data-utils';
 import { ToolDefinition } from '../types/tool-types';
 import { miroBoardId } from '../config';
+import { MCP_POSITIONING_GUIDE } from '../schemas/position-schema';
 
 // HTML processing functions
 /**
@@ -310,6 +311,28 @@ const ContentItemSchema = z.object({
 
 type ContentItemParams = z.infer<typeof ContentItemSchema>;
 
+/**
+ * Strips HTML tags from text to create a clean plain text string
+ * Used for cleaning frame titles that might contain HTML
+ */
+const stripHtmlTags = (text: string): string => {
+  if (!text) return '';
+  if (!containsHtml(text)) return text;
+  
+  // Remove all HTML tags
+  const strippedText = text.replace(/<[^>]*>/g, '');
+  
+  // Decode common HTML entities
+  return strippedText
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+};
+
 // Implementation of content item operations tool
 export const contentItemOperationsTool: ToolDefinition<ContentItemParams> = {
     name: 'mcp_miro_content_item_operations',
@@ -326,50 +349,9 @@ ACTIONS:
 (4) UPDATE - Modify existing items' content or appearance
 (5) DELETE - Remove items entirely
 
-TEXT HTML FORMATTING:
-- Supported HTML tags: <p>, <a>, <b>, <strong>, <i>, <em>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>
-- All other HTML tags will be escaped and displayed as plain text
-- Character limit: 6000 characters
-- Expected rendering examples:
-  * "<p>Normal paragraph text</p>" → Normal paragraph text
-  * "<p>Text with <strong>bold</strong> and <em>italic</em></p>" → Text with bold and italic
-  * "<p>Text with <a href='https://example.com'>link</a></p>" → Text with clickable link
-  * "<ul><li>First item</li><li>Second item</li></ul>" → Bulleted list with two items
-  * "<p>Text with <span style='color:red'>colored span</span></p>" → Note: inline styles in spans may not be fully supported
+${MCP_POSITIONING_GUIDE}
 
-COLOR FORMAT SUPPORT:
-- Most standard web color formats are accepted including:
-  * Hex with # prefix: "#FF0000" (red), "#000" (black)
-  * Hex without # prefix: "FF0000" (red), "000" (black)
-  * RGB function: "rgb(255, 0, 0)" (red)
-  * Named colors: "red", "blue", "green", "transparent", etc.
-- Item type specific color handling:
-  * Text & Shapes: Accept all color formats and convert as needed
-  * Sticky notes: Color will be mapped to the closest valid Miro sticky note color ("yellow", "blue", "green", etc.)
-- When in doubt, use standard 6-digit hex codes with # prefix for best compatibility
-
-POSITIONING ITEMS:
-- Default position: Center of the board if not specified (x: 0, y: 0)
-- Absolute coordinates: Use x, y values in dp (design pixels)
-- Parent frames: 
-  * When placing items inside a frame (using parent.id), position is relative to the frame's size
-  * For items in frames, use relativeTo: "parent_top_left" to position relative to frame's top-left corner
-  * Position values must be positive and within the frame's dimensions
-  * Example: {"x": 10, "y": 10, "relativeTo": "parent_top_left"} positions 10px from frame's top-left corner
-
-TEXT STYLE LIMITATIONS:
-- Font families: Limited to Miro's supported fonts (arial, roboto, times_new_roman, etc.)
-- Font sizes: Numeric values (14 = default, range from 0.001 to unlimited)
-- Text alignment: "left" (default), "center", or "right"
-- Background color: Set with fillColor (use "transparent" for no background)
-- Background opacity: 0.0 (transparent) to 1.0 (solid)
-
-STYLING EXAMPLES:
-- Text: {color: "#FF0000", fontFamily: "roboto", fontSize: 18, textAlign: "center"}
-- Shape: {fillColor: "#E6F9FF", fillOpacity: 0.5, borderColor: "#0000FF", borderWidth: 2}
-- Sticky note: {fillColor: "yellow"} (only accepts named colors, not hex values)
-
-For all items, omitted parameters will use reasonable defaults.`,
+FRAMES AND ORGANIZATION:`,
     parameters: ContentItemSchema,
     execute: async (args) => {
         console.log(`Content Item Operation: ${JSON.stringify(args, null, 2)}`);
@@ -390,10 +372,11 @@ For all items, omitted parameters will use reasonable defaults.`,
      * Use POSITIVE coordinates (x ≥ 0, y ≥ 0)
      * Example: {"x": 10, "y": 10, "relativeTo": "parent_top_left"}
 
-3. STYLE PROPERTIES:
-   - Text: {color, fontFamily, fontSize, textAlign}
-   - Shapes: {fillColor, borderColor, borderWidth, borderStyle, textAlign}
-   - Sticky Notes: {fillColor} (only named colors)
+3. FRAME USAGE:
+   - Frames use "title" parameter, not "content" - no HTML in frame titles
+   - Content with HTML should be in items inside the frame
+   - Create frames with mcp_miro_frame_operations, not content_item_operations
+   - Example frame creation: {"action":"create", "data":{"title":"My Frame"}}
 
 4. COMMON FIXES:
    - If color error: Double-check fillColor, borderColor, color properties
@@ -452,6 +435,47 @@ Position guide for items in frames:
                 console.log(`Modified HTML content to use only Miro-supported tags (<p>, <a>, <strong>, <b>, <em>, <i>, <u>, <s>, <span>, <ol>, <ul>, <li>, <br>).`);
                 console.log(`Original: ${originalContent}`);
                 console.log(`Modified: ${data.content}`);
+            }
+            
+            // Check if this might be an attempted frame title update with HTML
+            if (parent && parent.id && action === 'create') {
+                try {
+                    // Check if the parent is a frame
+                    const frameCheckUrl = `/v2/boards/${miroBoardId}/items/${parent.id}`;
+                    const frameResponse = await miroClient.get(frameCheckUrl);
+                    const frameData = frameResponse.data;
+                    
+                    if (frameData.type === 'frame') {
+                        console.log(`✓ Adding HTML content as an item inside frame ${parent.id}`);
+                    }
+                } catch (error) {
+                    console.warn(`Could not verify parent item ${parent.id}: ${error}`);
+                }
+            } else if (action === 'update' && item_id) {
+                try {
+                    // Check if we're trying to update a frame with HTML content
+                    const itemCheckUrl = `/v2/boards/${miroBoardId}/items/${item_id}`;
+                    const itemResponse = await miroClient.get(itemCheckUrl);
+                    const itemData = itemResponse.data;
+                    
+                    if (itemData.type === 'frame') {
+                        console.warn(`⚠️ Warning: Attempting to update a frame with HTML content.`);
+                        console.warn(`Frames use "title" (not "content") and do not support HTML formatting.`);
+                        console.warn(`Converting HTML to plain text for frame title.`);
+                        
+                        // Strip HTML and convert to plain text for frame title
+                        const plainText = stripHtmlTags(data.content);
+                        
+                        // Set as title instead of content
+                        data = {
+                            title: plainText
+                        };
+                        
+                        console.log(`Converted HTML to plain text title: "${plainText}"`);
+                    }
+                } catch (error) {
+                    console.warn(`Could not verify item ${item_id}: ${error}`);
+                }
             }
         }
 

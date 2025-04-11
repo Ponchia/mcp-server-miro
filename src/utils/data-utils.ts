@@ -54,28 +54,237 @@ export function normalizeGeometryValues(geometry: Record<string, unknown> | unde
 
 /**
  * Normalizes position values in a position object
- * Also removes relativeTo parameter which is not supported in some API calls
+ * Handles enhanced reference points and percentage values
  */
 export function normalizePositionValues(position: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
     if (!position) return undefined;
     
     const normalizedPosition = {...position};
     
-    // Convert x and y to numbers if they're strings
-    if (typeof normalizedPosition.x === 'string') {
-        normalizedPosition.x = parseFloat(normalizedPosition.x);
+    // Process percentage values if they exist
+    const hasPercentageX = typeof normalizedPosition.x === 'string' && 
+                          normalizedPosition.x.toString().endsWith('%');
+    const hasPercentageY = typeof normalizedPosition.y === 'string' && 
+                          normalizedPosition.y.toString().endsWith('%');
+    
+    // Handle percentage conversions - store original values for our later use
+    if (hasPercentageX || hasPercentageY) {
+        // Store original percentage values
+        normalizedPosition.__originalX = normalizedPosition.x;
+        normalizedPosition.__originalY = normalizedPosition.y;
+        
+        // If using percentages, default relativeTo to parent_percentage
+        if (!('relativeTo' in normalizedPosition)) {
+            normalizedPosition.__relativeTo = 'parent_percentage';
+        }
     }
     
-    if (typeof normalizedPosition.y === 'string') {
-        normalizedPosition.y = parseFloat(normalizedPosition.y);
+    // Convert x and y to numbers if they're strings (excluding percentage values)
+    if (typeof normalizedPosition.x === 'string' && !hasPercentageX) {
+        normalizedPosition.x = parseFloat(normalizedPosition.x as string);
     }
     
-    // Remove relativeTo property if present as it's not supported in some API calls
+    if (typeof normalizedPosition.y === 'string' && !hasPercentageY) {
+        normalizedPosition.y = parseFloat(normalizedPosition.y as string);
+    }
+    
+    // Store relativeTo for our internal use but remove from API call
     if ('relativeTo' in normalizedPosition) {
+        normalizedPosition.__relativeTo = normalizedPosition.relativeTo;
         delete normalizedPosition.relativeTo;
     }
     
     return normalizedPosition;
+}
+
+/**
+ * Translates coordinates between different reference systems
+ * Supports all reference points: canvas_center, parent_top_left, parent_center, parent_bottom_right, parent_percentage
+ */
+export function translatePosition(
+    coords: {x: number | string, y: number | string}, 
+    fromReference: string,
+    toReference: string,
+    parentGeometry?: {width?: number, height?: number},
+    parentPosition?: {x: number, y: number}
+): {x: number | string, y: number | string} {
+    // Can't translate without parent info for parent-related references
+    if ((fromReference.startsWith('parent_') || toReference.startsWith('parent_')) && 
+        (!parentGeometry || !parentPosition)) {
+        console.warn('Cannot translate between parent-related references without parent geometry and position');
+        return coords;
+    }
+    
+    // Handle same reference system - no translation needed
+    if (fromReference === toReference) {
+        return coords;
+    }
+    
+    const parentWidth = parentGeometry?.width || 0; 
+    const parentHeight = parentGeometry?.height || 0;
+    
+    // Convert input coordinates to numbers for calculations
+    let x = typeof coords.x === 'string' ? parseFloat(coords.x) : coords.x;
+    let y = typeof coords.y === 'string' ? parseFloat(coords.y) : coords.y;
+    
+    // Step 1: Convert from source reference to canvas_center
+    switch (fromReference) {
+        case 'canvas_center':
+            // Already in canvas_center
+            break;
+            
+        case 'parent_top_left':
+            // Convert from parent's top-left to parent's center
+            x = (x - parentWidth/2) + parentPosition!.x;
+            y = (y - parentHeight/2) + parentPosition!.y;
+            break;
+            
+        case 'parent_center':
+            // Convert from parent's center to canvas center
+            x = x + parentPosition!.x;
+            y = y + parentPosition!.y;
+            break;
+            
+        case 'parent_bottom_right':
+            // Convert from parent's bottom-right to parent's center, then to canvas center
+            x = (x - parentWidth) + parentPosition!.x;
+            y = (y - parentHeight) + parentPosition!.y;
+            break;
+            
+        case 'parent_percentage':
+            // Convert from percentage to parent's top-left, then to canvas center
+            if (typeof coords.x === 'string' && coords.x.endsWith('%')) {
+                const percentX = parseFloat(coords.x) / 100;
+                x = (percentX * parentWidth - parentWidth/2) + parentPosition!.x;
+            }
+            if (typeof coords.y === 'string' && coords.y.endsWith('%')) {
+                const percentY = parseFloat(coords.y) / 100;
+                y = (percentY * parentHeight - parentHeight/2) + parentPosition!.y;
+            }
+            break;
+    }
+    
+    // Prepare variables for return values and intermediate calculations
+    let resultX: number | string = x;
+    let resultY: number | string = y;
+    let relativeX: number = 0;
+    let relativeY: number = 0;
+    
+    // Step 2: Convert from canvas_center to target reference
+    switch (toReference) {
+        case 'canvas_center':
+            // Already in canvas_center
+            break;
+            
+        case 'parent_top_left':
+            // Convert from canvas center to parent's top-left
+            resultX = x - parentPosition!.x + parentWidth/2;
+            resultY = y - parentPosition!.y + parentHeight/2;
+            break;
+            
+        case 'parent_center':
+            // Convert from canvas center to parent's center
+            resultX = x - parentPosition!.x;
+            resultY = y - parentPosition!.y;
+            break;
+            
+        case 'parent_bottom_right':
+            // Convert from canvas center to parent's bottom-right
+            resultX = x - parentPosition!.x + parentWidth;
+            resultY = y - parentPosition!.y + parentHeight;
+            break;
+            
+        case 'parent_percentage':
+            // Convert from canvas center to percentage values
+            relativeX = x - parentPosition!.x + parentWidth/2;
+            relativeY = y - parentPosition!.y + parentHeight/2;
+            resultX = (relativeX / parentWidth * 100).toFixed(2) + '%';
+            resultY = (relativeY / parentHeight * 100).toFixed(2) + '%';
+            break;
+    }
+    
+    return {x: resultX, y: resultY};
+}
+
+/**
+ * Validates if position is valid for parent-child relationship
+ * Enhanced to support all reference points
+ */
+export function validateChildPosition(
+    position: Record<string, unknown> | undefined,
+    parentGeometry: { width?: number; height?: number } | undefined,
+    relativeTo?: string
+): { valid: boolean; message?: string } {
+    if (!position || !parentGeometry) return { valid: true };
+    
+    // Extract reference system
+    const referenceSystem = relativeTo || position.__relativeTo || 'parent_top_left';
+    
+    // Handle percentage values
+    if (referenceSystem === 'parent_percentage') {
+        const isXValid = typeof position.x === 'string' && 
+                         position.x.endsWith('%') && 
+                         parseFloat(position.x) >= 0 && 
+                         parseFloat(position.x) <= 100;
+                         
+        const isYValid = typeof position.y === 'string' && 
+                         position.y.endsWith('%') && 
+                         parseFloat(position.y) >= 0 && 
+                         parseFloat(position.y) <= 100;
+                         
+        if (!isXValid || !isYValid) {
+            return {
+                valid: false,
+                message: `Percentage position values must be between 0% and 100%. ` +
+                         `Example: {"x": "50%", "y": "50%", "relativeTo": "parent_percentage"} positions at center of parent.`
+            };
+        }
+        return { valid: true };
+    }
+    
+    // For absolute positioning reference points
+    const x = typeof position.x === 'number' ? position.x : 0;
+    const y = typeof position.y === 'number' ? position.y : 0;
+    
+    // Adjust validation based on reference point
+    switch (referenceSystem) {
+        case 'parent_top_left':
+            // Check if position is outside parent bounds
+            if (x < 0 || y < 0 || x > parentGeometry.width! || y > parentGeometry.height!) {
+                return {
+                    valid: false,
+                    message: `Position {x:${x}, y:${y}} with reference "parent_top_left" places item outside parent bounds. ` +
+                             `Use positive values less than parent width (${parentGeometry.width}) and height (${parentGeometry.height}).`
+                };
+            }
+            break;
+            
+        case 'parent_center':
+            // Check if position is outside parent bounds
+            if (Math.abs(x) > parentGeometry.width!/2 || Math.abs(y) > parentGeometry.height!/2) {
+                return {
+                    valid: false,
+                    message: `Position {x:${x}, y:${y}} with reference "parent_center" places item outside parent bounds. ` +
+                             `X must be between ${-parentGeometry.width!/2} and ${parentGeometry.width!/2}. ` +
+                             `Y must be between ${-parentGeometry.height!/2} and ${parentGeometry.height!/2}.`
+                };
+            }
+            break;
+            
+        case 'parent_bottom_right':
+            // Check if position is outside parent bounds
+            if (x > 0 || y > 0 || x < -parentGeometry.width! || y < -parentGeometry.height!) {
+                return {
+                    valid: false,
+                    message: `Position {x:${x}, y:${y}} with reference "parent_bottom_right" places item outside parent bounds. ` +
+                             `X must be between ${-parentGeometry.width!} and 0. ` +
+                             `Y must be between ${-parentGeometry.height!} and 0.`
+                };
+            }
+            break;
+    }
+    
+    return { valid: true };
 }
 
 /**

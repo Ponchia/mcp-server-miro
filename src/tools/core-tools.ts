@@ -2,16 +2,12 @@ import { z } from 'zod';
 import miroClient from '../client/miro-client';
 import { miroBoardId } from '../config';
 import { formatApiResponse, formatApiError } from '../utils/api-utils';
-import { normalizePositionValues } from '../utils/data-utils';
+import { normalizePositionValues, validateChildPosition } from '../utils/data-utils';
 import { ToolDefinition } from '../types/tool-types';
+import { PositionSchema, MCP_POSITIONING_GUIDE } from '../schemas/position-schema';
 
-// Schema definitions for common parameters
-export const PositionChangeSchema = z.object({
-    x: z.number().describe('X-axis coordinate.'),
-    y: z.number().describe('Y-axis coordinate.'),
-    origin: z.enum(['center']).optional().describe('Origin point for coordinates.'),
-    relativeTo: z.enum(['canvas_center', 'parent_top_left']).optional().describe('Coordinate system reference.')
-});
+// Use the centralized position schema
+export const PositionChangeSchema = PositionSchema;
 
 export const GeometrySchema = z.object({
      width: z.number().optional().describe('Width in pixels.'),
@@ -38,7 +34,9 @@ type BulkItemCreationParams = z.infer<typeof BulkItemsSchema>;
 // Bulk creation tool
 export const bulkItemCreationTool: ToolDefinition<BulkItemCreationParams> = {
     name: 'mcp_miro_bulk_item_creation',
-    description: 'Creates multiple items on a Miro board simultaneously in a single API call (up to 20 items maximum). This is ideal for efficiently building complex diagrams, charts, or layouts with many related elements. All item types are supported including shapes, sticky notes, text, images, and more. Each item in the batch can have its own type, data properties, styling, position, and dimensions. Items can be positioned relative to the canvas center or within parent frames. This tool uses atomic operations - if any single item fails validation, the entire batch will fail and no items will be created, ensuring visual consistency. Use this when you need to create multiple related items at once, such as flowchart nodes, dashboard elements, or diagram components that form a cohesive visual.',
+    description: `Creates multiple items on a Miro board simultaneously in a single API call (up to 20 items maximum). This is ideal for efficiently building complex diagrams, charts, or layouts with many related elements. All item types are supported including shapes, sticky notes, text, images, and more. Each item in the batch can have its own type, data properties, styling, position, and dimensions. Items can be positioned relative to the canvas center or within parent frames. This tool uses atomic operations - if any single item fails validation, the entire batch will fail and no items will be created, ensuring visual consistency. Use this when you need to create multiple related items at once, such as flowchart nodes, dashboard elements, or diagram components that form a cohesive visual.
+
+${MCP_POSITIONING_GUIDE}`,
     parameters: BulkItemsSchema,
     execute: async (args) => {
         const { items } = args;
@@ -46,7 +44,7 @@ export const bulkItemCreationTool: ToolDefinition<BulkItemCreationParams> = {
         console.log(`Executing mcp_miro_bulk_item_creation: POST ${url}`);
         console.log(`Creating ${items.length} items in bulk`);
         
-        // Normalize each item's position to remove unsupported properties like relativeTo
+        // Normalize each item's position to handle enhanced reference points
         const normalizedItems = items.map(item => {
             // Create a shallow copy of the item
             const normalizedItem = { ...item };
@@ -54,6 +52,13 @@ export const bulkItemCreationTool: ToolDefinition<BulkItemCreationParams> = {
             // If there's a position, normalize it
             if (normalizedItem.position) {
                 normalizedItem.position = normalizePositionValues(normalizedItem.position) as typeof normalizedItem.position;
+                
+                // Check if parent present and position needs validation
+                if (normalizedItem.parent?.id && normalizedItem.position) {
+                    // Get parent ID to retrieve its geometry later if needed
+                    const parentId = normalizedItem.parent.id;
+                    console.log(`Item with parent ${parentId} will use position relative to parent`);
+                }
             }
             
             // Sanitize style objects - remove unsupported properties
@@ -171,7 +176,11 @@ type UpdateItemPositionOrParentParams = z.infer<typeof updateItemPositionOrParen
 
 export const itemPositionOperationsTool: ToolDefinition<UpdateItemPositionOrParentParams> = {
     name: 'mcp_miro_update_item_position_or_parent',
-    description: 'Moves items to new positions or reassigns them to different parent frames on a Miro board. Use this tool to: (1) reposition items by specifying new X/Y coordinates, (2) organize items by placing them inside frames, (3) extract items from frames by removing their parent assignment. Position coordinates can be specified relative to the canvas center or parent frame\'s top-left corner. This tool handles special cases like connector positioning limitations and frame nesting restrictions automatically. Each item can exist in only one position and can have at most one parent. When moving items into frames, the tool validates compatibility and prevents unsupported operations like placing frames inside other frames. IMPORTANT LIMITATIONS: Connectors cannot be assigned to parent frames. Frames cannot be nested inside other frames via API. For valid positioning, always provide numeric x/y values. All position values must be numbers, not strings. Example structure: {"item_id": "3458764513289346", "position": {"x": 100, "y": 200}, "parent": {"id": "3458764513289347"}}.',
+    description: `Moves items to new positions or reassigns them to different parent frames on a Miro board. Use this tool to: (1) reposition items by specifying new X/Y coordinates, (2) organize items by placing them inside frames, (3) extract items from frames by removing their parent assignment. Position coordinates can be specified relative to different reference points. This tool handles special cases like connector positioning limitations and frame nesting restrictions automatically. Each item can exist in only one position and can have at most one parent. When moving items into frames, the tool validates compatibility and prevents unsupported operations like placing frames inside other frames.
+
+${MCP_POSITIONING_GUIDE}
+
+LIMITATIONS: Connectors cannot be assigned to parent frames. Frames cannot be nested inside other frames via API.`,
     parameters: updateItemPositionOrParentSchema,
     execute: async (args) => {
         const { item_id, ...requestBody } = args;
@@ -212,6 +221,41 @@ export const itemPositionOperationsTool: ToolDefinition<UpdateItemPositionOrPare
         
         const url = `/v2/boards/${miroBoardId}/items/${item_id}`;
         console.log(`Executing mcp_miro_update_item_position_or_parent: PATCH ${url}`);
+        
+        // Check if we need parent geometry for position validation
+        let parentGeometry;
+        let referenceSystem;
+        
+        if (requestBody.position && requestBody.parent?.id) {
+            try {
+                // Get parent item to retrieve its dimensions
+                const parentResponse = await miroClient.get(`/v2/boards/${miroBoardId}/items/${requestBody.parent.id}`);
+                parentGeometry = parentResponse.data.geometry;
+                
+                // Check for reference system in the position
+                if (requestBody.position.relativeTo) {
+                    referenceSystem = requestBody.position.relativeTo;
+                } else if ('__relativeTo' in requestBody.position) {
+                    referenceSystem = requestBody.position.__relativeTo;
+                }
+                
+                // Validate position based on reference system and parent geometry
+                if (referenceSystem && typeof referenceSystem === 'string' && referenceSystem.startsWith('parent_')) {
+                    const validationResult = validateChildPosition(
+                        requestBody.position, 
+                        parentGeometry, 
+                        referenceSystem
+                    );
+                    
+                    if (!validationResult.valid) {
+                        return validationResult.message || 'Invalid position for parent-child relationship';
+                    }
+                }
+            } catch (error) {
+                console.error(`Error validating parent-child positioning: ${error}`);
+                // Continue with the operation even if validation fails
+            }
+        }
         
         // Normalize position values
         const normalizedPosition = normalizePositionValues(requestBody.position);

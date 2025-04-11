@@ -4,6 +4,7 @@ import miroClient from '../client/miro-client';
 import { miroBoardId } from '../config';
 import { formatApiResponse, formatApiError } from '../utils/api-utils';
 import { modificationHistory } from '../utils/data-utils';
+import { MCP_POSITIONING_GUIDE } from '../schemas/position-schema';
 
 // Schema definitions for connector operations
 const ConnectorOperationsSchema = z.object({
@@ -71,7 +72,16 @@ type ConnectorOperationsParams = z.infer<typeof ConnectorOperationsSchema>;
 // Fully implemented connector operations tool
 export const connectorOperationsTool: ToolDefinition<ConnectorOperationsParams> = {
     name: 'mcp_miro_connector_operations',
-    description: 'Creates and manages line connections between items on a Miro board to show relationships and flows. Use this tool to: (1) create - draw new lines between two distinct items with customizable appearance, (2) get - retrieve a specific connector\'s details by ID, (3) get_all - list all connectors on the board with pagination, (4) update - modify an existing connector\'s appearance or endpoints, (5) delete - remove a connector entirely. Connectors can be styled with different line types (straight, curved, elbowed), colors, stroke styles (solid, dashed, dotted), endpoints (arrows, diamonds, etc.), and can include up to 20 text captions along their path. When creating connections, you must specify both startItem and endItem with their unique IDs. You can control precise connection points using relative percentage positions (e.g., "50%") or by specifying which side to snap to (top, right, bottom, left). Ideal for creating flowcharts, relationship diagrams, mind maps, or any visualization that shows connections between concepts.',
+    description: `Creates and manages line connections between items on a Miro board to show relationships and flows. Use this tool to: (1) create - draw new lines between two distinct items with customizable appearance, (2) get - retrieve a specific connector's details by ID, (3) get_all - list all connectors on the board with pagination, (4) update - modify an existing connector's appearance or endpoints, (5) delete - remove a connector entirely.
+
+${MCP_POSITIONING_GUIDE}
+
+CONNECTOR-SPECIFIC POSITIONING:
+• For connector endpoints, use relative percentage positions from 0% to 100% 
+• Example: {"x": "50%", "y": "0%"} connects to the middle of the top edge
+• Alternatively, use snapTo with "auto", "top", "right", "bottom", or "left"
+
+Connectors can be styled with different line types (straight, curved, elbowed), colors, stroke styles (solid, dashed, dotted), endpoints (arrows, diamonds, etc.), and can include up to 20 text captions along their path. When creating connections, you must specify both startItem and endItem with their unique IDs. Ideal for creating flowcharts, relationship diagrams, mind maps, or any visualization that shows connections between concepts.`,
     parameters: ConnectorOperationsSchema,
     execute: async (args) => {
         const { action, connector_id, ...otherArgs } = args;

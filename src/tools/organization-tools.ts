@@ -4,6 +4,7 @@ import miroClient from '../client/miro-client';
 import { miroBoardId } from '../config';
 import { formatApiResponse, formatApiError } from '../utils/api-utils';
 import { normalizeGeometryValues, normalizePositionValues, normalizeStyleValues, modificationHistory } from '../utils/data-utils';
+import { MCP_POSITIONING_GUIDE } from '../schemas/position-schema';
 
 // Frame Operation schemas
 const FrameDataSchema = z.object({
@@ -84,10 +85,14 @@ const TagItemOperationsSchema = z.object({
 
 type TagItemOperationsParams = z.infer<typeof TagItemOperationsSchema>;
 
-// Fully implemented frame operations tool
+// Update frame operations tool with enhanced positioning guide
 export const frameOperationsTool: ToolDefinition<FrameOperationsParams> = {
     name: 'mcp_miro_frame_operations',
-    description: 'Creates and manages containment areas (frames) that visually organize content on Miro boards. Use this tool to: (1) create - add new rectangular containers with customizable size, position, and background color, (2) get - retrieve a specific frame\'s details, (3) get_all - list all frames on the board, (4) get_items - list all items contained within a specific frame, (5) update - modify an existing frame\'s properties, (6) delete - remove a frame entirely. Frames are rectangular containers that visually group related items and can have titles for labeling sections of your board. When items are placed inside a frame, they become children of that frame and move with it when the frame is repositioned. POSITIONING: Frames are positioned using x,y coordinates. By default, coordinates are relative to the canvas center (0,0), where positive x moves right and positive y moves down. When positioning items inside a frame, use "relativeTo": "parent_top_left" to specify coordinates measured from the frame\'s top-left corner. Frame deletion will not delete its contained items - they will remain on the board but will no longer be contained.',
+    description: `Creates and manages containment areas (frames) that visually organize content on Miro boards. Use this tool to: (1) create - add new rectangular containers with customizable size, position, and background color, (2) get - retrieve a specific frame's details, (3) get_all - list all frames on the board, (4) get_items - list all items contained within a specific frame, (5) update - modify an existing frame's properties, (6) delete - remove a frame entirely. Frames are rectangular containers that visually group related items and can have titles for labeling sections of your board. When items are placed inside a frame, they become children of that frame and move with it when the frame is repositioned.
+
+${MCP_POSITIONING_GUIDE}
+
+FRAME-SPECIFIC NOTES: Frame deletion will not delete its contained items - they will remain on the board but will no longer be contained within the frame. Frames cannot be nested inside other frames via API.`,
     parameters: FrameOperationsSchema,
     execute: async (args) => {
         const { action, item_id, ...requestBody } = args;

@@ -4,6 +4,7 @@ import miroClient from '../client/miro-client';
 import { miroBoardId } from '../config';
 import { formatApiResponse, formatApiError } from '../utils/api-utils';
 import { normalizeGeometryValues, normalizePositionValues, modificationHistory } from '../utils/data-utils';
+import { MCP_POSITIONING_GUIDE } from '../schemas/position-schema';
 
 // Schema definitions for media operations
 const MediaItemSchema = z.object({
@@ -46,12 +47,23 @@ const MediaItemSchema = z.object({
     { message: 'title is not supported for embed type', path: ['data', 'title'] }
 );
 
-type MediaItemParams = z.infer<typeof MediaItemSchema>;
+type MediaItemOperationsParams = z.infer<typeof MediaItemSchema>;
 
 // Fully implemented media item operations tool
-export const mediaItemOperationsTool: ToolDefinition<MediaItemParams> = {
+export const mediaItemOperationsTool: ToolDefinition<MediaItemOperationsParams> = {
     name: 'mcp_miro_media_item_operations',
-    description: 'Adds and manages visual media content on Miro boards with the following operations: (1) create - place new media by URL, (2) get - retrieve a specific media item\'s details, (3) get_all - list all media of a particular type, (4) update - modify existing media properties, (5) delete - remove media items. Supports four distinct media types: images (photos, diagrams, icons, logos), documents (PDFs shown as thumbnails), embeds (interactive web content), and previews (URL link previews). Images provide visual illustration and can be sized while maintaining aspect ratio. Documents display multipage content that users can browse. Embeds show interactive web content in two modes (inline or modal). Previews display link metadata with thumbnails. All media requires a valid URL source and can be positioned anywhere on the board or inside frames. For creation, the data.url parameter is required. Images and documents maintain their aspect ratio automatically, so typically only specify width. Use this tool to add visual elements like screenshots, logos, diagrams, webpage previews, or PDF documentation to enhance board content with rich media.',
+    description: `Adds and manages visual media content on Miro boards with the following operations: (1) create - place new media by URL, (2) get - retrieve a specific media item's details, (3) get_all - list all media of a particular type, (4) update - modify existing media properties, (5) delete - remove media items. Supports four distinct media types: images (photos, diagrams, icons, logos), documents (PDFs shown as thumbnails), embeds (interactive web content), and previews (URL link previews).
+
+${MCP_POSITIONING_GUIDE}
+
+MEDIA-SPECIFIC NOTES:
+• Images provide visual illustration and maintain aspect ratio
+• Documents display multipage content that users can browse
+• Embeds show interactive web content in inline or modal mode
+• Previews display link metadata with thumbnails
+• All media requires a valid URL source
+
+For creation, the data.url parameter is required. Images and documents maintain their aspect ratio automatically, so typically only specify width. Use this tool to add visual elements like screenshots, logos, diagrams, webpage previews, or PDF documentation to enhance board content with rich media.`,
     parameters: MediaItemSchema,
     execute: async (args) => {
         const { action, type, item_id, data, position, geometry, parent } = args;
