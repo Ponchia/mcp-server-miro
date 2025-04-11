@@ -163,14 +163,15 @@ export const itemListOperationsTool: ToolDefinition<ListBoardItemsParams> = {
 const updateItemPositionOrParentSchema = z.object({
     item_id: z.string().describe('Unique identifier (ID) of the item to update.'),
     position: PositionChangeSchema.optional().describe('Updated position.'),
-    parent: z.object({ id: z.string().optional() }).optional().describe('Updated parent frame ID.')
+    parent: z.object({ id: z.string().optional() }).optional().describe('Updated parent frame ID.'),
+    data: z.record(z.unknown()).optional().describe('Contains data information applicable for each item type.')
 }).passthrough();
 
 type UpdateItemPositionOrParentParams = z.infer<typeof updateItemPositionOrParentSchema>;
 
 export const itemPositionOperationsTool: ToolDefinition<UpdateItemPositionOrParentParams> = {
     name: 'mcp_miro_update_item_position_or_parent',
-    description: 'Moves items to new positions or reassigns them to different parent frames on a Miro board. Use this tool to: (1) reposition items by specifying new X/Y coordinates, (2) organize items by placing them inside frames, (3) extract items from frames by removing their parent assignment. Position coordinates can be specified relative to the canvas center or parent frame\'s top-left corner. This tool handles special cases like connector positioning limitations and frame nesting restrictions automatically. Each item can exist in only one position and can have at most one parent. When moving items into frames, the tool validates compatibility and prevents unsupported operations like placing frames inside other frames. Use this for organizing content, improving visual layouts, or grouping related items together.',
+    description: 'Moves items to new positions or reassigns them to different parent frames on a Miro board. Use this tool to: (1) reposition items by specifying new X/Y coordinates, (2) organize items by placing them inside frames, (3) extract items from frames by removing their parent assignment. Position coordinates can be specified relative to the canvas center or parent frame\'s top-left corner. This tool handles special cases like connector positioning limitations and frame nesting restrictions automatically. Each item can exist in only one position and can have at most one parent. When moving items into frames, the tool validates compatibility and prevents unsupported operations like placing frames inside other frames. IMPORTANT LIMITATIONS: Connectors cannot be assigned to parent frames. Frames cannot be nested inside other frames via API. For valid positioning, always provide numeric x/y values. All position values must be numbers, not strings. Example structure: {"item_id": "3458764513289346", "position": {"x": 100, "y": 200}, "parent": {"id": "3458764513289347"}}.',
     parameters: updateItemPositionOrParentSchema,
     execute: async (args) => {
         const { item_id, ...requestBody } = args;
@@ -215,10 +216,40 @@ export const itemPositionOperationsTool: ToolDefinition<UpdateItemPositionOrPare
         // Normalize position values
         const normalizedPosition = normalizePositionValues(requestBody.position);
         
-        const patchData = {
+        // Handle data conversion if necessary
+        const patchData: Record<string, unknown> = {
             ...(normalizedPosition && { position: normalizedPosition }),
             ...(requestBody.parent && { parent: requestBody.parent }),
         };
+        
+        // Handle data.content -> data.title conversion for frames
+        if (requestBody.data) {
+            try {
+                // Get the item type to check if it's a frame
+                const itemResponse = await miroClient.get(`/v2/boards/${miroBoardId}/items/${item_id}`);
+                const itemType = itemResponse.data.type;
+                
+                if (itemType === 'frame' && requestBody.data.content && !requestBody.data.title) {
+                    console.log('Converting content to title for frame');
+                    patchData.data = {
+                        ...requestBody.data,
+                        title: requestBody.data.content
+                    };
+                    // Remove the content property if it exists in data
+                    if (patchData.data && typeof patchData.data === 'object') {
+                        const dataObj = patchData.data as Record<string, unknown>;
+                        delete dataObj.content;
+                    }
+                } else {
+                    patchData.data = requestBody.data;
+                }
+            } catch (error) {
+                console.error(`Error checking item type for data conversion: ${error}`);
+                // Continue with the operation even if the check fails
+                patchData.data = requestBody.data;
+            }
+        }
+        
         console.log(`With body: ${JSON.stringify(patchData)}`);
         try {
             const response = await miroClient.patch(url, patchData);
