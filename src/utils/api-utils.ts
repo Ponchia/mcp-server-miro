@@ -1,6 +1,15 @@
 import { AxiosError } from 'axios';
 
 /**
+ * Error response interface for consistent error objects
+ */
+export interface ErrorResponse {
+    error: string;
+    status: number;
+    details?: string;
+}
+
+/**
  * Formats API responses for consistent output
  */
 export function formatApiResponse(response: unknown): string {
@@ -9,21 +18,39 @@ export function formatApiResponse(response: unknown): string {
 
 /**
  * Formats API errors for consistent error handling
+ * @param error The error object
+ * @param customMessage Optional custom message
+ * @param throwError Whether to throw the error (default true) or return an ErrorResponse
+ * @returns ErrorResponse object if throwError is false
+ * @throws Error if throwError is true
  */
-export function formatApiError(error: unknown, customMessage?: string): string {
-    console.error(`API Call Failed: ${(error as Error).message}`);
+export function formatApiError(error: unknown, customMessage?: string, throwError: boolean = true): ErrorResponse {
+    console.error(`API Call Failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     const axiosError = error as AxiosError;
-    let errorMessage = customMessage || `Miro API Request Error: ${(error as Error).message}`;
+    
+    // Ensure error message is always a string
+    let errorMessage = customMessage || `Miro API Request Error: ${error instanceof Error && typeof error.message === 'string' ? error.message : 'Unknown error'}`;
+    let statusCode = 500;
     
     if (axiosError.response) {
-        console.error(`Status: ${axiosError.response.status}`);
+        statusCode = axiosError.response.status;
+        console.error(`Status: ${statusCode}`);
         const responseData = JSON.stringify(axiosError.response.data);
         console.error(`Data: ${responseData}`);
         if (!customMessage) {
-            errorMessage = `Miro API Error (${axiosError.response.status}): ${responseData}`;
+            errorMessage = `Miro API Error (${statusCode}): ${responseData}`;
         }
     }
     
-    // Throwing the error string so FastMCP can handle it
-    throw new Error(errorMessage);
+    const errorResponse: ErrorResponse = {
+        error: errorMessage,
+        status: statusCode,
+        details: axiosError.response?.data ? JSON.stringify(axiosError.response.data) : ''
+    };
+    
+    if (throwError) {
+        throw new Error(errorMessage);
+    }
+    
+    return errorResponse;
 } 

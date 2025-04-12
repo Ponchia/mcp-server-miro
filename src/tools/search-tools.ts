@@ -251,18 +251,27 @@ const isColorMatch = (itemColor: string | undefined, searchColor: string | undef
 
 // Helper function to check if an item is within a specified area
 const isInArea = (item: MiroItem, area: { x: number; y: number; width: number; height: number }): boolean => {
-    if (!item.position) return false;
+    // Get item position and dimensions
+    let itemX = 0, itemY = 0, itemWidth = 0, itemHeight = 0;
     
-    const itemX = item.position.x;
-    const itemY = item.position.y;
-    
-    // Calculate item boundaries using position and geometry (if available)
-    let itemWidth = 0;
-    let itemHeight = 0;
+    if (item.position) {
+        itemX = typeof item.position.x === 'string' 
+            ? parseFloat(item.position.x) 
+            : (item.position.x || 0);
+            
+        itemY = typeof item.position.y === 'string' 
+            ? parseFloat(item.position.y) 
+            : (item.position.y || 0);
+    }
     
     if (item.geometry) {
-        itemWidth = item.geometry.width || 0;
-        itemHeight = item.geometry.height || 0;
+        itemWidth = typeof item.geometry.width === 'string' 
+            ? parseFloat(item.geometry.width) 
+            : (item.geometry.width || 0);
+            
+        itemHeight = typeof item.geometry.height === 'string' 
+            ? parseFloat(item.geometry.height) 
+            : (item.geometry.height || 0);
     }
     
     // By default, consider position as center of the item
@@ -376,7 +385,8 @@ The response includes matched items with their properties, position, and content
                 // Type filter (if multiple types specified)
                 if (args.item_types && args.item_types.length > 0) {
                     filteredItems = filteredItems.filter(item => {
-                        return args.item_types?.includes(item.type as any); // eslint-disable-line @typescript-eslint/no-explicit-any - necessary due to type constraints
+                        // Check if the item type is in the requested types
+                        return args.item_types?.some(t => t === item.type);
                     });
                 }
                 
@@ -423,7 +433,8 @@ The response includes matched items with their properties, position, and content
                 if (args.item_types && args.item_types.length > 0) {
                     const typeMatches = new Set<string>();
                     allItems.forEach(item => {
-                        if (args.item_types?.includes(item.type as any)) { // eslint-disable-line @typescript-eslint/no-explicit-any - necessary due to type constraints
+                        // Check if the item type is in the requested types
+                        if (args.item_types?.some(t => t === item.type)) {
                             typeMatches.add(item.id);
                         }
                     });
@@ -506,10 +517,26 @@ The response includes matched items with their properties, position, and content
             if (args.sort_by) {
                 switch (args.sort_by) {
                     case 'position_x':
-                        filteredItems.sort((a, b) => (a.position?.x || 0) - (b.position?.x || 0));
+                        filteredItems.sort((a, b) => {
+                            const ax = typeof a.position?.x === 'string' 
+                                ? parseFloat(a.position.x || '0') 
+                                : (a.position?.x || 0);
+                            const bx = typeof b.position?.x === 'string' 
+                                ? parseFloat(b.position.x || '0') 
+                                : (b.position?.x || 0);
+                            return ax - bx;
+                        });
                         break;
                     case 'position_y':
-                        filteredItems.sort((a, b) => (a.position?.y || 0) - (b.position?.y || 0));
+                        filteredItems.sort((a, b) => {
+                            const ay = typeof a.position?.y === 'string' 
+                                ? parseFloat(a.position.y || '0') 
+                                : (a.position?.y || 0);
+                            const by = typeof b.position?.y === 'string' 
+                                ? parseFloat(b.position.y || '0') 
+                                : (b.position?.y || 0);
+                            return ay - by;
+                        });
                         break;
                     case 'created_at':
                         // We don't have creation date in the data model, so we'll use a simple ID comparison

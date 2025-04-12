@@ -23,6 +23,26 @@ import {
     checkForSimilarContentTool,
     searchTool
 } from './tools/search-tools';
+import { ErrorResponse } from './utils/api-utils';
+import { ToolDefinition } from './types/tool-types';
+
+// Helper function to adapt our tools to the FastMCP interface
+// This handles the type conversion automatically
+function adaptTool<T>(tool: ToolDefinition<T, string | ErrorResponse>) {
+    return {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+        execute: async (args: T) => {
+            const result = await tool.execute(args);
+            // If the result is an ErrorResponse, convert it to a string
+            if (typeof result === 'object' && result !== null && 'error' in result) {
+                return JSON.stringify(result);
+            }
+            return result;
+        }
+    };
+}
 
 // Create the server with enhanced error handling
 const server = new FastMCP({
@@ -123,38 +143,38 @@ const server = new FastMCP({
  * creating complex layouts with parent-child relationships.
  */
 
-// Register tools in order of importance
+// Register tools in order of importance using the adapter
 
 // 1. Context Understanding Tools
 // server.addTool(boardStateOperationsTool); // Partially replaced by searchTool for area and content filtering
-server.addTool(hierarchyOperationsTool);
+server.addTool(adaptTool(hierarchyOperationsTool));
 // server.addTool(itemListOperationsTool); // Commented out: Replaced by searchTool for better type filtering and pagination
 
 // 2. Search and Discovery Tools
-server.addTool(searchTool);
+server.addTool(adaptTool(searchTool));
 // server.addTool(searchElementsByContentTool); // Commented out: Replaced by searchTool with enhanced text search capabilities
-server.addTool(checkForSimilarContentTool);
+server.addTool(adaptTool(checkForSimilarContentTool));
 
 // 3. Visual Content Tools - Prioritized for visual tasks
-server.addTool(mediaItemOperationsTool); // Moved up for higher priority
-server.addTool(appCardOperationsTool);   // Moved up for higher priority
+server.addTool(adaptTool(mediaItemOperationsTool)); 
+server.addTool(adaptTool(appCardOperationsTool));   
 
 // 4. Core Manipulation Tools
-server.addTool(boardOperationsTool); // Enable board-level operations
-server.addTool(bulkItemCreationTool); // Enable bulk item creation for improved efficiency
-server.addTool(contentItemOperationsTool);
-server.addTool(itemPositionOperationsTool);
-server.addTool(itemDeletionOperationsTool);
+server.addTool(adaptTool(boardOperationsTool)); 
+server.addTool(adaptTool(bulkItemCreationTool)); 
+server.addTool(adaptTool(contentItemOperationsTool));
+server.addTool(adaptTool(itemPositionOperationsTool));
+server.addTool(adaptTool(itemDeletionOperationsTool));
 
 // 5. Organization and Structure Tools
-server.addTool(frameOperationsTool); // Essential for creating frames with advanced positioning support
-server.addTool(connectorOperationsTool);
-server.addTool(groupOperationsTool);
-server.addTool(tagOperationsTool);
-server.addTool(tagItemOperationsTool);
+server.addTool(adaptTool(frameOperationsTool)); 
+server.addTool(adaptTool(connectorOperationsTool));
+server.addTool(adaptTool(groupOperationsTool));
+server.addTool(adaptTool(tagOperationsTool));
+server.addTool(adaptTool(tagItemOperationsTool));
 
 // 6. Collaboration Tools
-server.addTool(collaborationOperationsTool);
+server.addTool(adaptTool(collaborationOperationsTool));
 
 // Set up enhanced process error handlers to prevent crashing
 process.on('uncaughtException', (error) => {
