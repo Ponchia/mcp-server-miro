@@ -1350,8 +1350,11 @@ Position guide for items in frames:
                     if (refSystem === 'parent_center') {
                         // When using parent_center, always enforce origin: 'center'
                         normalizedPosition.origin = 'center';
-                        // For parent_center, we don't need to translate coordinates - let the API handle it
-                        console.log(`Using parent_center with origin: center - no coordinate translation needed`);
+                        // Convert from parent center to parent top-left
+                        normalizedPosition.x = x + (parentWidth / 2);
+                        normalizedPosition.y = y + (parentHeight / 2);
+                        normalizedPosition.relativeTo = 'parent_top_left';
+                        console.log(`Translated from parent_center: (${x},${y}) -> (${normalizedPosition.x},${normalizedPosition.y})`);
                     } 
                     else if (refSystem === 'parent_top_left') {
                         // For parent_top_left, ensure positive coordinates
