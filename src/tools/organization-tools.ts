@@ -87,7 +87,11 @@ const TagItemOperationsSchema = z.object({
 // Update the TagItemOperationsParams type to include a return type that allows for error objects
 type TagItemOperationsParams = z.infer<typeof TagItemOperationsSchema>;
 
-// Update frame operations tool with enhanced positioning guide
+/**
+ * WARNING: Tag functionality is currently disabled due to issues with the Miro API
+ * The tag endpoints are returning 404 errors even with correctly formatted requests
+ * These tools remain in the codebase for future use once the API issues are resolved
+ */
 export const frameOperationsTool: ToolDefinition<FrameOperationsParams, string | ErrorResponse> = {
     name: 'mcp_miro_frame_operations',
     description: `Creates and manages containment areas (frames) that visually organize content on Miro boards. Use this tool to: (1) create - add new rectangular containers with customizable size, position, and background color, (2) get - retrieve a specific frame's details, (3) get_all - list all frames on the board, (4) get_items - list all items contained within a specific frame, (5) update - modify an existing frame's properties, (6) delete - remove a frame entirely. Frames are rectangular containers that visually group related items and can have titles for labeling sections of your board. When items are placed inside a frame, they become children of that frame and move with it when the frame is repositioned.
@@ -376,7 +380,11 @@ export const groupOperationsTool: ToolDefinition<GroupOperationsParams, string |
     },
 };
 
-// Fully implemented tag operations tool
+/**
+ * WARNING: Tag functionality is currently disabled due to issues with the Miro API
+ * The tag endpoints are returning 404 errors even with correctly formatted requests
+ * These tools remain in the codebase for future use once the API issues are resolved
+ */
 export const tagOperationsTool: ToolDefinition<TagOperationsParams, string | ErrorResponse> = {
     name: 'mcp_miro_tag_operations',
     description: 'Creates and manages categorization labels (tags) that can be applied to multiple items across a board. Use this tool to: (1) create - define a new tag with a name and color, (2) get_all - list all tags on the board, (3) get - retrieve a specific tag\'s details, (4) update - modify a tag\'s name or color, (5) delete - remove a tag entirely. Tags are visual labels with text and background color that identify related items across a board regardless of position. Unlike groups or frames, tags don\'t affect item positioning - they provide pure categorization and filtering capabilities. Tags support 12 predefined colors (not hex codes): red, light_green, cyan, yellow, magenta, green, blue, gray, violet, dark_green, dark_blue, and black. The maximum tag name length is 128 characters. Creating or updating tags only defines the tag - to attach tags to items, use the tag_item_operations tool. Tags are ideal for implementing cross-cutting categorization, status indicators, or priority levels across diverse board content.',
@@ -453,7 +461,11 @@ export const tagOperationsTool: ToolDefinition<TagOperationsParams, string | Err
     },
 };
 
-// Fully implemented tag-item operations tool
+/**
+ * WARNING: Tag functionality is currently disabled due to issues with the Miro API
+ * The tag endpoints are returning 404 errors even with correctly formatted requests
+ * These tools remain in the codebase for future use once the API issues are resolved
+ */
 export const tagItemOperationsTool: ToolDefinition<TagItemOperationsParams, string | ErrorResponse> = {
     name: 'mcp_miro_tag_item_operations',
     description: 'Associates or disassociates tags with specific items on a Miro board. Use this tool to: (1) attach - apply an existing tag to a specific item, making the tag visible on that item, (2) detach - remove a tag from a specific item without deleting the tag itself, (3) get_items_with_tag - retrieve all items currently tagged with a specific tag. Tags must be created first using the tag_operations tool before they can be attached to items. Multiple different tags can be attached to the same item, creating multi-dimensional categorization. When tags are attached to items, they appear visually on those items in the Miro UI with their specified color and name. This tool only manages the relationships between tags and items - it doesn\'t create or modify the tags themselves. Use this for implementing filtering systems, marking status across different board elements, or creating visual categorization schemes that cut across different item types and board sections.',
@@ -472,11 +484,12 @@ export const tagItemOperationsTool: ToolDefinition<TagItemOperationsParams, stri
         
         try {
             // For attach and detach actions, validate the item type
+            let itemType = '';
             if ((action === 'attach' || action === 'detach') && item_id) {
                 try {
                     // Get the item to check its type
-                    const itemResponse = await miroClient.get(`/v2/boards/${miroBoardId}/items/${item_id}`);
-                    const itemType = itemResponse.data.type;
+                    const itemResponse = await miroClient.get(`/v2/boards/${String(miroBoardId)}/items/${item_id}`);
+                    itemType = itemResponse.data.type;
                     
                     // According to Miro documentation, tags can only be used with cards and sticky notes
                     if (itemType !== 'sticky_note' && itemType !== 'card' && itemType !== 'app_card') {
@@ -502,16 +515,29 @@ export const tagItemOperationsTool: ToolDefinition<TagItemOperationsParams, stri
             
             switch (action) {
                 case 'attach':
-                    // URL format based on Miro API documentation - correct format for attaching a tag
-                    url = `/v2/boards/${miroBoardId}/items/${item_id}/tags/${tag_id}`;
+                    // Use specific endpoints based on item type instead of generic item endpoint
+                    if (itemType === 'sticky_note') {
+                        url = `/v2/boards/${encodeURIComponent(String(miroBoardId))}/sticky_notes/${item_id}/tags/${tag_id}`;
+                    } else if (itemType === 'card') {
+                        url = `/v2/boards/${encodeURIComponent(String(miroBoardId))}/cards/${item_id}/tags/${tag_id}`;
+                    } else if (itemType === 'app_card') {
+                        url = `/v2/boards/${encodeURIComponent(String(miroBoardId))}/app_cards/${item_id}/tags/${tag_id}`;
+                    }
                     method = 'post';
                     break;
                 case 'detach':
-                    url = `/v2/boards/${miroBoardId}/items/${item_id}/tags/${tag_id}`;
+                    // Use specific endpoints based on item type instead of generic item endpoint
+                    if (itemType === 'sticky_note') {
+                        url = `/v2/boards/${encodeURIComponent(String(miroBoardId))}/sticky_notes/${item_id}/tags/${tag_id}`;
+                    } else if (itemType === 'card') {
+                        url = `/v2/boards/${encodeURIComponent(String(miroBoardId))}/cards/${item_id}/tags/${tag_id}`;
+                    } else if (itemType === 'app_card') {
+                        url = `/v2/boards/${encodeURIComponent(String(miroBoardId))}/app_cards/${item_id}/tags/${tag_id}`;
+                    }
                     method = 'delete';
                     break;
                 case 'get_items_with_tag':
-                    url = `/v2/boards/${miroBoardId}/tags/${tag_id}/items`;
+                    url = `/v2/boards/${encodeURIComponent(String(miroBoardId))}/tags/${tag_id}/items`;
                     method = 'get';
                     break;
             }
@@ -521,41 +547,58 @@ export const tagItemOperationsTool: ToolDefinition<TagItemOperationsParams, stri
             // Execute the API call based on the determined method
             let response;
             
-            if (method === 'get') {
-                response = await miroClient.get(url);
-                return formatApiResponse(response.data);
-            } else if (method === 'post') {
-                // For POST, create an empty body as required by Miro API
-                response = await miroClient.post(url, {});
-                
-                // Track the modification history
-                if (response.status === 201 || response.status === 200) {
-                    modificationHistory.trackModification({
-                        id: item_id!,
-                        type: 'unknown', // We don't need to specify the exact type here
-                        tags: [tag_id]
+            try {
+                if (method === 'get') {
+                    response = await miroClient.get(url);
+                    return formatApiResponse(response.data);
+                } else if (method === 'post') {
+                    // For POST, create an empty body as required by Miro API
+                    response = await miroClient.post(url, {}, {
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
                     });
                     
-                    return formatApiResponse({ 
-                        success: true, 
-                        message: `Tag ${tag_id} attached to item ${item_id} successfully.`
-                    });
+                    // Track the modification history
+                    if (response.status === 201 || response.status === 200) {
+                        modificationHistory.trackModification({
+                            id: item_id!,
+                            type: 'unknown', // We don't need to specify the exact type here
+                            tags: [tag_id]
+                        });
+                        
+                        return formatApiResponse({ 
+                            success: true, 
+                            message: `Tag ${tag_id} attached to item ${item_id} successfully.`
+                        });
+                    }
+                    
+                    return formatApiResponse(response.data || { message: `Tag ${tag_id} attached to item ${item_id} successfully.` });
+                } else if (method === 'delete') {
+                    response = await miroClient.delete(url);
+                    
+                    // DELETE operations often return 204 No Content
+                    if (response.status === 204) {
+                        return `Tag ${tag_id} detached from item ${item_id} successfully.`;
+                    }
+                    
+                    return formatApiResponse(response.data || `Tag operation completed successfully.`);
                 }
                 
-                return formatApiResponse(response.data || { message: `Tag ${tag_id} attached to item ${item_id} successfully.` });
-            } else if (method === 'delete') {
-                response = await miroClient.delete(url);
+                // This should never happen given the switch above
+                throw new Error(`Invalid action: ${action}`);
+            } catch (error) {
+                const axiosError = error as AxiosError;
+                console.error(`Tag operation failed:`, axiosError.message, axiosError.response?.data);
                 
-                // DELETE operations often return 204 No Content
-                if (response.status === 204) {
-                    return `Tag ${tag_id} detached from item ${item_id} successfully.`;
-                }
-                
-                return formatApiResponse(response.data || `Tag operation completed successfully.`);
+                // Return a properly structured error with more detailed information
+                return {
+                    error: typeof axiosError.message === 'string' ? axiosError.message : 'Unknown error',
+                    status: axiosError.response?.status || 500,
+                    details: axiosError.response?.data ? JSON.stringify(axiosError.response.data) : '',
+                    url: url // Include the URL that failed for debugging
+                };
             }
-            
-            // This should never happen given the switch above
-            throw new Error(`Invalid action: ${action}`);
             
         } catch (error) {
             const axiosError = error as AxiosError;
@@ -568,4 +611,4 @@ export const tagItemOperationsTool: ToolDefinition<TagItemOperationsParams, stri
             };
         }
     },
-}; 
+};

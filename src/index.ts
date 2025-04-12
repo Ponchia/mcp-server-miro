@@ -11,8 +11,8 @@ import { mediaItemOperationsTool } from './tools/media-tools';
 import { 
     frameOperationsTool,
     groupOperationsTool, 
-    tagItemOperationsTool, 
-    tagOperationsTool,
+    // tagItemOperationsTool, 
+    // tagOperationsTool,
 } from './tools/organization-tools';
 import { connectorOperationsTool } from './tools/connector-tools';
 import { collaborationOperationsTool, appCardOperationsTool } from './tools/collaboration-tools';
@@ -170,8 +170,8 @@ server.addTool(adaptTool(itemDeletionOperationsTool));
 server.addTool(adaptTool(frameOperationsTool)); 
 server.addTool(adaptTool(connectorOperationsTool));
 server.addTool(adaptTool(groupOperationsTool));
-server.addTool(adaptTool(tagOperationsTool));
-server.addTool(adaptTool(tagItemOperationsTool));
+// server.addTool(adaptTool(tagOperationsTool)); // Removed due to API issues
+// server.addTool(adaptTool(tagItemOperationsTool)); // Removed due to API issues
 
 // 6. Collaboration Tools
 server.addTool(adaptTool(collaborationOperationsTool));

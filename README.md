@@ -93,18 +93,6 @@ The server provides the following categories of tools:
   - Operations: `create`, `get_all`, `get`, `get_items`, `update`, `ungroup`, `delete`
   - Parameters: `group_id`, `item_ids`
 
-- **`mcp_miro_tag_operations`**: Manages categorization tags.
-  - Usage: Create tags with specific names and colors; update existing tags.
-  - Example: Create tags for "Approved", "In Progress", "Blocked" statuses with corresponding colors.
-  - Operations: `create`, `get_all`, `get`, `update`, `delete`
-  - Parameters: `tag_id`, `data` (title, fillColor)
-
-- **`mcp_miro_tag_item_operations`**: Associates tags with items.
-  - Usage: Attach or detach tags from specific items; retrieve all items with a specific tag.
-  - Example: Tag all approved requirements with the "Approved" tag.
-  - Operations: `attach`, `detach`, `get_items_with_tag`
-  - Parameters: `tag_id`, `item_id`
-
 ### Search & Discovery
 
 - **`mcp_miro_unified_search`**: Multi-criteria search tool.
