@@ -168,12 +168,6 @@ The server provides the following categories of tools:
 
 ### Collaboration & Access Control
 
-- **`mcp_miro_widget_operations`**: Manages comments and feedback.
-  - Usage: Create, retrieve, update, resolve, and delete comments.
-  - Example: Add feedback comments to specific items or positions on the board.
-  - Operations: `create_comment`, `get_comments`, `get_comment`, `update_comment`, `resolve_comment`, `delete_comment`
-  - Parameters: `comment_id`, `data` (content, itemId, position, permissions)
-
 - **`mcp_miro_collaboration_operations`**: Manages board access and permissions.
   - Usage: List users, share board with new users, update member roles, remove users.
   - Example: Invite a new team member as a commenter.

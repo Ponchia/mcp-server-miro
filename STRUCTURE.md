@@ -24,7 +24,7 @@ src/
     ├── media-tools.ts        # Images, documents, embeds
     ├── organization-tools.ts # Frames, groups, tags
     ├── connector-tools.ts    # All connector operations
-    ├── collaboration-tools.ts# Members, sharing, comments
+    ├── collaboration-tools.ts# Members, sharing, app cards
     ├── card-tools.ts         # App card operations
     ├── state-tools.ts        # Hierarchy and board state operations
     └── search-tools.ts       # Content search and duplicate detection
@@ -173,14 +173,12 @@ The Miro MCP Server is built on several key architectural principles:
 
 #### Collaboration and User Management
 
-- **collaboration-tools.ts**: Comments, sharing, and permissions.
-  - **Widgets/Comments**: Feedback and discussion functionality
+- **collaboration-tools.ts**: Sharing, permissions, and app cards.
   - **User Management**: Invite, update, and remove users
   - **App Cards**: Interactive cards with custom fields
 
   Implementation approach:
   - Handles board membership operations
-  - Manages comment lifecycle
   - Supports sharing with specific permission levels
 
 #### State and Analysis

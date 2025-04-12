@@ -5,42 +5,7 @@ import { miroBoardId } from '../config';
 import { formatApiResponse, formatApiError } from '../utils/api-utils';
 import { normalizeGeometryValues, normalizePositionValues, normalizeStyleValues, modificationHistory } from '../utils/data-utils';
 
-// Widget operations schema
-const WidgetOperationsSchema = z.object({
-    action: z.enum(['create_comment', 'get_comments', 'get_comment', 'update_comment', 'resolve_comment', 'delete_comment']).describe('The action to perform.'),
-    comment_id: z.string().optional().describe('Comment ID (required for get_comment, update_comment, resolve_comment, delete_comment actions).'),
-    // Create/update properties
-    data: z.object({
-        content: z.string().optional().describe('Comment text content.'),
-        itemId: z.string().optional().describe('Associated item ID.'),
-        position: z.object({
-            x: z.number().describe('X position on the board.'),
-            y: z.number().describe('Y position on the board.'),
-        }).optional().describe('Comment position (for standalone comments).'),
-        // Additional potential fields based on Miro API
-        permissions: z.object({
-            edit: z.boolean().optional().describe('Whether the comment can be edited.'),
-            delete: z.boolean().optional().describe('Whether the comment can be deleted.'),  
-        }).optional().describe('Comment permissions.'),
-    }).optional().describe('Comment data.'),
-    // List options
-    cursor: z.string().optional().describe('Pagination cursor (for get_comments action).'),
-    limit: z.string().optional().describe('Maximum results per call (for get_comments action).'),
-})
-.refine(
-    data => !(['get_comment', 'update_comment', 'resolve_comment', 'delete_comment'].includes(data.action)) || data.comment_id, 
-    { message: 'comment_id is required for get_comment, update_comment, resolve_comment, delete_comment actions', path: ['comment_id'] }
-)
-.refine(
-    data => !(['create_comment'].includes(data.action)) || data.data, 
-    { message: 'data is required for create_comment action', path: ['data'] }
-)
-.refine(
-    data => !(['create_comment'].includes(data.action)) || data.data?.content, 
-    { message: 'data.content is required for create_comment action', path: ['data', 'content'] }
-);
-
-type WidgetOperationsParams = z.infer<typeof WidgetOperationsSchema>;
+// Widget operations schema and tool removed since the comment endpoint does not exist in Miro API
 
 // Collaboration operations schema
 const CollaborationOperationsSchema = z.object({
@@ -107,98 +72,6 @@ const AppCardItemSchema = z.object({
 }).passthrough();
 
 type AppCardItemParams = z.infer<typeof AppCardItemSchema>;
-
-// Widget operations tool (comments, feedback)
-export const widgetOperationsTool: ToolDefinition<WidgetOperationsParams> = {
-    name: 'mcp_miro_widget_operations',
-    description: 'Manages comments on Miro boards for team feedback and collaboration. Use this tool to: (1) create_comment - add a new comment, either standalone or attached to an item, (2) get_comments - retrieve all comments on the board with pagination support, (3) get_comment - fetch a specific comment by ID, (4) update_comment - modify an existing comment\'s text content, (5) resolve_comment - mark comments as resolved in feedback workflows, (6) delete_comment - permanently remove comments. For creating comments, provide content text and either a position or itemId to attach it to. Comments can be created as standalone objects positioned anywhere on the board or attached directly to existing items.',
-    parameters: WidgetOperationsSchema,
-    execute: async (args) => {
-        const { action, comment_id, data, cursor, limit } = args;
-        let url = '';
-        let method = '';
-        const queryParams: Record<string, string> = {};
-        let body = null;
-
-        // Construct the URL based on action
-        switch (action) {
-            case 'create_comment':
-                url = `/v2/boards/${miroBoardId}/comments`;
-                method = 'post';
-                body = data;
-                break;
-            case 'get_comments':
-                url = `/v2/boards/${miroBoardId}/comments`;
-                method = 'get';
-                if (cursor) queryParams.cursor = cursor;
-                if (limit) queryParams.limit = limit;
-                break;
-            case 'get_comment':
-                url = `/v2/boards/${miroBoardId}/comments/${comment_id}`;
-                method = 'get';
-                break;
-            case 'update_comment':
-                url = `/v2/boards/${miroBoardId}/comments/${comment_id}`;
-                method = 'patch';
-                body = { data };
-                break;
-            case 'resolve_comment':
-                url = `/v2/boards/${miroBoardId}/comments/${comment_id}/resolve`;
-                method = 'put';
-                break;
-            case 'delete_comment':
-                url = `/v2/boards/${miroBoardId}/comments/${comment_id}`;
-                method = 'delete';
-                break;
-        }
-
-        console.log(`Executing widget_operations (${action}): ${method.toUpperCase()} ${url}`);
-        if (body) {
-            console.log(`With body: ${JSON.stringify(body)}`);
-        }
-
-        try {
-            let response;
-
-            if (method === 'get') {
-                response = await miroClient.get(url, { params: queryParams });
-            } else if (method === 'post') {
-                response = await miroClient.post(url, body);
-                // Track creation in history
-                if (response.data) {
-                    modificationHistory.trackCreation(response.data);
-                }
-            } else if (method === 'put') {
-                response = await miroClient.put(url);
-                // Track resolution as a modification
-                if (comment_id) {
-                    const modifiedItemData = { id: comment_id, type: 'comment', status: 'resolved' };
-                    modificationHistory.trackModification(modifiedItemData);
-                }
-            } else if (method === 'patch') {
-                response = await miroClient.patch(url, body);
-                // Track modification in history
-                if (response.data) {
-                    modificationHistory.trackModification(response.data);
-                }
-            } else if (method === 'delete') {
-                response = await miroClient.delete(url);
-                if (response.status === 204) {
-                    return `Comment ${comment_id} deleted successfully (Status: ${response.status}).`;
-                }
-            }
-
-            if (!response) {
-                throw new Error(`Invalid method: ${method}`);
-            }
-
-            console.log(`API Call Successful: ${response.status}`);
-            return formatApiResponse(response.data);
-        } catch (error) {
-            return formatApiError(error);
-        }
-    }
-};
 
 // Collaboration operations tool (members, sharing)
 export const collaborationOperationsTool: ToolDefinition<CollaborationOperationsParams> = {

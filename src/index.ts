@@ -15,7 +15,7 @@ import {
     tagOperationsTool,
 } from './tools/organization-tools';
 import { connectorOperationsTool } from './tools/connector-tools';
-import { widgetOperationsTool, collaborationOperationsTool, appCardOperationsTool } from './tools/collaboration-tools';
+import { collaborationOperationsTool, appCardOperationsTool } from './tools/collaboration-tools';
 import { 
     hierarchyOperationsTool
 } from './tools/state-tools';
@@ -154,7 +154,6 @@ server.addTool(tagOperationsTool);
 server.addTool(tagItemOperationsTool);
 
 // 6. Collaboration Tools
-server.addTool(widgetOperationsTool);
 server.addTool(collaborationOperationsTool);
 
 // Set up enhanced process error handlers to prevent crashing

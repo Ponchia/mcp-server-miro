@@ -43,16 +43,6 @@ export interface MiroTag {
     [key: string]: unknown;
 }
 
-export interface MiroComment {
-    id: string;
-    content?: string;
-    author?: string;
-    itemId?: string;
-    position?: { x: number; y: number };
-    createdAt?: string;
-    [key: string]: unknown;
-}
-
 export interface MiroConnector extends MiroItem {
     startItem?: { id: string; [key: string]: unknown };
     endItem?: { id: string; [key: string]: unknown };
@@ -123,12 +113,10 @@ export interface BoardMetadata {
     groupCount: number;
     connectorCount: number;
     tagCount: number;
-    commentCount: number;
     hasItemLimit?: boolean;
     itemLimit?: number;
     limitReached?: boolean;
     includeItemContent?: boolean;
-    includeComments?: boolean;
     includeTags?: boolean;
     includeHistory?: boolean;
     includeConnectivity?: boolean;
@@ -145,7 +133,6 @@ export interface BoardState {
     groups: MiroGroup[];
     connectors?: MiroConnector[];
     tags: MiroTag[];
-    comments?: MiroComment[];
     connectivity?: {
         map: Record<string, string[]>;
         details: Record<string, ConnectivityDetails>;

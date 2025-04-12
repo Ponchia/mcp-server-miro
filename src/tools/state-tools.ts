@@ -3,13 +3,12 @@ import { ToolDefinition } from '../types/tool-types';
 import miroClient from '../client/miro-client';
 import { miroBoardId } from '../config';
 import { formatApiResponse, formatApiError } from '../utils/api-utils';
-import { MiroItem, MiroFrame, MiroGroup, MiroTag, MiroComment, MiroConnector, HierarchyItem, BoardState } from '../types/miro-types';
+import { MiroItem, MiroFrame, MiroGroup, MiroTag, MiroConnector, HierarchyItem, BoardState } from '../types/miro-types';
 import { generateContentSummary, modificationHistory } from '../utils/data-utils';
 
 // Define schemas
 const completeBoardSchema = z.object({
     include_item_content: z.boolean().optional().default(true).describe('Whether to include the full content of each item.'),
-    include_comments: z.boolean().optional().default(false).describe('Whether to include comments.'),
     include_tags: z.boolean().optional().default(true).describe('Whether to include tags.'),
     include_history: z.boolean().optional().default(true).describe('Whether to include modification history.'),
     include_content_summaries: z.boolean().optional().default(true).describe('Whether to include content summaries for text items.'),
@@ -45,12 +44,10 @@ interface BoardMetadata {
     groupCount: number;
     connectorCount: number;
     tagCount: number;
-    commentCount: number;
     hasItemLimit?: boolean;
     itemLimit?: number;
     limitReached?: boolean;
     includeItemContent?: boolean;
-    includeComments?: boolean;
     includeTags?: boolean;
     includeHistory?: boolean;
     includeConnectivity?: boolean;
@@ -83,7 +80,6 @@ export const boardStateOperationsTool: ToolDefinition<CompleteBoardParams> = {
         console.log(`Executing mcp_miro_board_state_operations with params: ${JSON.stringify(args)}`);
         const { 
             include_item_content, 
-            include_comments, 
             include_tags, 
             include_history, 
             include_content_summaries,
@@ -136,7 +132,7 @@ export const boardStateOperationsTool: ToolDefinition<CompleteBoardParams> = {
                     
                     // Apply frame filtering if frame_id is provided
                     if (frame_id) {
-                        newItems = newItems.filter(item => 
+                        newItems = newItems.filter((item: MiroItem) => 
                             item.parent && 
                             typeof item.parent === 'object' && 
                             'id' in item.parent && 
@@ -315,73 +311,6 @@ export const boardStateOperationsTool: ToolDefinition<CompleteBoardParams> = {
                 }
             } catch (error) {
                 console.error(`Error getting groups: ${error}`);
-            }
-
-            // Step 7: Get comments if requested (limit to essential data)
-            const boardComments: MiroComment[] = [];
-            if (include_comments) {
-                try {
-                    const commentsResponse = await miroClient.get(`/v2/boards/${miroBoardId}/comments`);
-                    if (commentsResponse.data.data) {
-                        // Extract only essential comment data
-                        const allComments = commentsResponse.data.data.map((comment: {
-                            id: string;
-                            data?: {
-                                content?: string;
-                                author?: string;
-                                itemId?: string;
-                                position?: {x: number; y: number};
-                                createdAt?: string;
-                            };
-                        }) => ({
-                            id: comment.id,
-                            content: comment.data?.content,
-                            author: comment.data?.author,
-                            itemId: comment.data?.itemId,
-                            position: comment.data?.position,
-                            createdAt: comment.data?.createdAt
-                        }));
-                        
-                        // Filter comments by frame_id if specified
-                        if (frame_id) {
-                            // Include comments attached to items in this frame
-                            // and standalone comments positioned inside the frame
-                            const frameItems = new Set(allItems
-                                .filter(item => item.parent && typeof item.parent === 'object' && 
-                                       'id' in item.parent && item.parent.id === frame_id)
-                                .map(item => item.id));
-                            
-                            const frameGeometry = frameInfo ? {
-                                x: frameInfo.position.x,
-                                y: frameInfo.position.y,
-                                width: frameInfo.geometry.width,
-                                height: frameInfo.geometry.height
-                            } : null;
-                            
-                            boardComments.push(...allComments.filter((comment: MiroComment) => {
-                                // Include if comment is attached to an item in this frame
-                                if (comment.itemId && frameItems.has(comment.itemId)) {
-                                    return true;
-                                }
-                                
-                                // Include if comment position is inside the frame bounds
-                                if (!comment.itemId && comment.position && frameGeometry) {
-                                    const { x, y } = comment.position;
-                                    return x >= frameGeometry.x - frameGeometry.width/2 && 
-                                           x <= frameGeometry.x + frameGeometry.width/2 &&
-                                           y >= frameGeometry.y - frameGeometry.height/2 &&
-                                           y <= frameGeometry.y + frameGeometry.height/2;
-                                }
-                                
-                                return false;
-                            }));
-                        } else {
-                            boardComments.push(...allComments);
-                        }
-                    }
-                } catch (error) {
-                    console.error(`Error getting comments: ${error}`);
-                }
             }
 
             // Step 8: Get tags if requested (optimized)
@@ -572,8 +501,7 @@ export const boardStateOperationsTool: ToolDefinition<CompleteBoardParams> = {
             if (connection_analysis) {
                 // Find actual duplicate connections (more than one connector between same items)
                 const duplicateConnections = Array.from(connectionDuplicates.entries())
-                    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                    .filter(([_duplicateKey, connectorIds]) => connectorIds.length > 1)
+                    .filter(([, connectorIds]: [string, string[]]) => connectorIds.length > 1)
                     .map(([key, connectorIds]) => {
                         const [item1, item2] = key.split('-');
                         return {
@@ -585,7 +513,7 @@ export const boardStateOperationsTool: ToolDefinition<CompleteBoardParams> = {
                 // Find items with many connections (potential issues)
                 const manyConnectionsThreshold = 10;
                 const itemsWithManyConnections = Array.from(itemConnectionCounts.entries())
-                    .filter(([_, data]) => data.count >= manyConnectionsThreshold)
+                    .filter(([, data]: [string, { count: number; connectorIds: string[] }]) => data.count >= manyConnectionsThreshold)
                     .map(([itemId, data]) => ({
                         itemId,
                         connectionCount: data.count,
@@ -645,39 +573,35 @@ export const boardStateOperationsTool: ToolDefinition<CompleteBoardParams> = {
             });
             
             // Construct final board state object (with optimization options)
+            const metadata: BoardMetadata = {
+                timestamp: new Date().toISOString(),
+                itemCount: allItems.length,
+                frameCount: boardFrames.length,
+                groupCount: boardGroups.length,
+                connectorCount: boardConnectors.length,
+                tagCount: boardTags.length,
+                hasItemLimit: hasItemLimit,
+                itemLimit: max_items,
+                limitReached: hasItemLimit && itemCount >= max_items,
+                includeItemContent: include_item_content,
+                includeTags: include_tags,
+                includeHistory: include_history,
+                includeConnectivity: include_connectivity,
+                frameId: frame_id,
+                searchTerm: search_term,
+                filteredItemCount: allItems.length
+            };
+            
             const boardState: Partial<BoardState> = {
                 board: boardInfo,
                 items: allItems,
                 frames: boardFrames,
                 groups: boardGroups,
                 tags: boardTags,
-                metadata: {
-                    timestamp: new Date().toISOString(),
-                    itemCount: allItems.length,
-                    frameCount: boardFrames.length,
-                    groupCount: boardGroups.length,
-                    connectorCount: boardConnectors.length,
-                    tagCount: boardTags.length,
-                    commentCount: boardComments.length,
-                    hasItemLimit: hasItemLimit,
-                    itemLimit: max_items,
-                    limitReached: hasItemLimit && itemCount >= max_items,
-                    includeItemContent: include_item_content,
-                    includeComments: include_comments,
-                    includeTags: include_tags,
-                    includeHistory: include_history,
-                    includeConnectivity: include_connectivity,
-                    frameId: frame_id,
-                    searchTerm: search_term,
-                    filteredItemCount: allItems.length
-                } as BoardMetadata
+                metadata: metadata
             };
             
             // Only add optional data if requested
-            if (include_comments) {
-                boardState.comments = boardComments;
-            }
-            
             if (include_connectivity) {
                 boardState.connectors = boardConnectors;
                 boardState.connectivity = {
