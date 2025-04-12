@@ -396,34 +396,36 @@ POSITIONING IN FRAMES (SIMPLIFIED):
    "position": {
      "x": 0,
      "y": 0,
-     "relativeTo": "parent_center",
      "origin": "center"
+   }
+   "parent": {
+     "id": "FRAME_ID"
    }
 
 2. TOP-LEFT CORNER OF FRAME:
    "position": {
      "x": 10,
-     "y": 10,
-     "relativeTo": "parent_top_left"
+     "y": 10
+   }
+   "parent": {
+     "id": "FRAME_ID"
    }
 
 3. SPECIFIC LOCATION FROM TOP-LEFT:
    "position": {
      "x": 100,  // 100px from left edge
-     "y": 50,   // 50px from top edge
-     "relativeTo": "parent_top_left"
+     "y": 50    // 50px from top edge
+   }
+   "parent": {
+     "id": "FRAME_ID"
    }
 
-4. CENTER WITH OFFSET:
-   "position": {
-     "x": 50,   // 50px right of center
-     "y": -30,  // 30px above center
-     "relativeTo": "parent_center",
-     "origin": "center"
-   }
+IMPORTANT: Do NOT include "relativeTo" property in the position object - it's not supported by the Miro API.
+The parent ID is what determines that the item should be placed inside a frame.
 
-• Always use positive coordinates with parent_top_left
-• Always include "origin": "center" when using parent_center
+• Always use positive coordinates (x,y) with frame positioning
+• Always include "origin": "center" when placing at the center of a frame
+• For all cases, include the parent frame ID in a separate parent object
 
 FRAMES AND ORGANIZATION:`,
     parameters: ContentItemSchema,
@@ -1465,6 +1467,17 @@ Position guide for items in frames:
         // Remove all internal tracking properties before final API call
         if (body.position && typeof body.position === 'object') {
             const position = body.position as Record<string, unknown>;
+            
+            // Check if relativeTo is included in the position object and provide a clear error
+            if (position.relativeTo) {
+                console.error(`ERROR: The "relativeTo" property is not supported by the Miro API.`);
+                console.error(`Please remove "relativeTo" from the position object and use the parent.id to indicate frame placement.`);
+                console.error(`For positioning inside frames, use: position: {x: value, y: value, origin: "center"} and parent: {id: "FRAME_ID"}`);
+                
+                // Remove the relativeTo property to avoid API errors
+                delete position.relativeTo;
+            }
+            
             const cleanedPosition: Record<string, unknown> = {
                 x: position.x,
                 y: position.y,
