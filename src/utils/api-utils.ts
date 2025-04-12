@@ -11,9 +11,31 @@ export interface ErrorResponse {
 
 /**
  * Formats API responses for consistent output
+ * Uses a replacer function to ensure large numeric IDs are preserved as strings
  */
 export function formatApiResponse(response: unknown): string {
-    return JSON.stringify(response, null, 2);
+    const idReplacer = (key: string, value: unknown) => {
+        // Handle case where value is a large number (like an ID)
+        if (typeof value === 'number' && 
+            (key === 'id' || key.endsWith('_id')) && 
+            value.toString().length > 15) {
+            return value.toString();
+        }
+        
+        // Special handling for items array which contains numeric IDs
+        if (key === 'items' && Array.isArray(value)) {
+            return value.map(item => {
+                if (typeof item === 'number' && item.toString().length > 15) {
+                    return item.toString();
+                }
+                return item;
+            });
+        }
+        
+        return value;
+    };
+    
+    return JSON.stringify(response, idReplacer, 2);
 }
 
 /**
